@@ -4,6 +4,8 @@
   import ClassColumn from './components/ClassColumn.svelte';
   import TableColumn from './components/TableColumn.svelte';
   import DetailColumn from './components/DetailColumn.svelte';
+  import CodeView from './views/CodeView.svelte';
+  import ExportView from './views/ExportView.svelte';
 
   init();
 </script>
@@ -35,9 +37,9 @@
       <DetailColumn />
     </main>
   {:else if app.view === 'code'}
-    <main class="placeholder">Code view — next phase of this bucket</main>
+    <main class="full"><CodeView /></main>
   {:else}
-    <main class="placeholder">Export view — next phase of this bucket</main>
+    <main class="full"><ExportView /></main>
   {/if}
 </div>
 
@@ -140,11 +142,9 @@
     border-radius: var(--r-md);
   }
 
-  .placeholder {
+  .full {
+    flex: 1;
+    min-height: 0;
     display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-3);
-    font-size: var(--fs-lg);
   }
 </style>
