@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, selectEntry } from '../lib/stores.svelte';
+  import { app, selectEntry, toggleSelectedEntry } from '../lib/stores.svelte';
   import type { TableRow } from '../lib/api';
 
   const headerRows = $derived(app.payload?.table_rows.filter((r) => r.row_type === 'header') ?? []);
@@ -39,6 +39,20 @@
           onclick={() => selectEntry(row.record_id)}
         >
           <div class="entry-head">
+            {#if app.selectMode}
+              <span
+                class="check"
+                class:checked={app.selectedEntries.includes(row.record_id)}
+                role="checkbox"
+                aria-checked={app.selectedEntries.includes(row.record_id)}
+                tabindex="0"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  toggleSelectedEntry(row.record_id);
+                }}
+                onkeydown={(e) => e.key === ' ' && toggleSelectedEntry(row.record_id)}
+              ></span>
+            {/if}
             {#if row.dep_hash_stale || row.format_version_stale || row.source_stale}
               <span class="dot dot--warning" title="stale"></span>
             {/if}
@@ -110,6 +124,20 @@
     display: flex;
     align-items: center;
     gap: var(--s-2);
+  }
+
+  .check {
+    width: 14px;
+    height: 14px;
+    border: 1.5px solid var(--border-strong);
+    border-radius: var(--r-xs);
+    flex: none;
+    background: var(--bg-elev);
+  }
+
+  .check.checked {
+    background: var(--accent);
+    border-color: var(--accent);
   }
 
   .hash {

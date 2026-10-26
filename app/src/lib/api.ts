@@ -178,11 +178,21 @@ export interface DashboardRequest {
   selected_entry?: string | null;
   kind_filter?: string;
   spec_filters?: Record<string, string[]>;
-  filters?: { target: string; op: string; value: string }[];
+  filters?: { target: string; operator: string; value: string }[];
   logic_mode?: 'AND' | 'OR' | 'NOT';
   row_display?: 'none' | 'all' | 'selected';
   hide_stale?: boolean;
   version_filter?: string | null;
+}
+
+async function postJSON<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json() as Promise<T>;
 }
 
 async function getJson<T>(url: string): Promise<T> {
@@ -211,4 +221,18 @@ export const api = {
 
   fileUrl: (path: string) => `/api/file?path=${encodeURIComponent(path)}`,
   boundsMapUrl: (crs: string) => `/api/bounds-map?crs=${encodeURIComponent(crs)}`,
+
+  rebuild: (reimport: boolean) =>
+    postJSON('/api/rebuild', { reimport }),
+
+  cleanCache: (dryRun: boolean) => postJSON<{ lines: string[]; dry_run: boolean }>('/api/clean-cache', { dry_run: dryRun }),
+
+  cleanSource: (dryRun: boolean) =>
+    postJSON<{ lines: string[]; dry_run: boolean }>('/api/clean-source', { dry_run: dryRun }),
+
+  deleteEntry: (recordId: string) =>
+    fetch(`/api/entry/${encodeURIComponent(recordId)}`, { method: 'DELETE' }).then(async (res) => {
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      return res.json();
+    }),
 };

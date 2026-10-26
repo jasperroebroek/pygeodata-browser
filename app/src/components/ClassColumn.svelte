@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { app, selectClasses } from '../lib/stores.svelte';
+  import { app, selectClasses, toggleHideStale, toggleShowEmpty } from '../lib/stores.svelte';
   import type { ClassCard } from '../lib/api';
+  import FilterPanel from './FilterPanel.svelte';
 
   let search = $state('');
 
@@ -36,12 +37,27 @@
     search ? cards.filter((c) => c.class_name.toLowerCase().includes(search.toLowerCase())) : cards,
   );
 
-  const visible = $derived(filtered.filter((c) => c.visible_record_count > 0 || app.selectedClasses.length === 0));
+  const visible = $derived(
+    app.showEmpty || app.selectedClasses.length > 0
+      ? filtered
+      : filtered.filter((c) => c.visible_record_count > 0),
+  );
 </script>
 
 <aside class="classes">
   <div class="search">
     <input type="search" placeholder="Filter classes…" bind:value={search} />
+  </div>
+
+  <FilterPanel />
+
+  <div class="toggles">
+    <button class:active={app.hideStale} onclick={toggleHideStale} title="Hide entries whose dependencies changed">
+      Hide stale
+    </button>
+    <button class:active={app.showEmpty} onclick={toggleShowEmpty} title="Show classes without entries">
+      Show empty
+    </button>
   </div>
 
   <div class="list">
@@ -101,6 +117,28 @@
 
   input:focus {
     outline: 1.5px solid var(--accent);
+    border-color: transparent;
+  }
+
+  .toggles {
+    display: flex;
+    gap: var(--s-1);
+    padding: var(--s-2);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .toggles button {
+    flex: 1;
+    padding: 3px 8px;
+    border-radius: var(--r-full);
+    border: 1px solid var(--border-strong);
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+  }
+
+  .toggles button.active {
+    background: var(--accent-soft);
+    color: var(--accent-text);
     border-color: transparent;
   }
 

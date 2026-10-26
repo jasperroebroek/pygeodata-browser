@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { app, reloadState, setKindFilter, setRowDisplay, toggleTheme } from '../lib/stores.svelte';
+  import { app, setKindFilter, setRowDisplay, setSelectMode, toggleTheme } from '../lib/stores.svelte';
+  import Menu from './Menu.svelte';
   import type { KindFilter } from '../lib/stores.svelte';
 
   const kinds: { key: KindFilter; label: string }[] = [
@@ -15,6 +16,8 @@
     { key: 'export', label: 'Export' },
   ];
 
+  const exportCount = $derived(app.selectedEntries.length);
+
   function setView(view: 'entries' | 'code' | 'export') {
     app.view = view;
   }
@@ -23,7 +26,9 @@
 <header class="topbar">
   <nav class="views">
     {#each views as v}
-      <button class:active={app.view === v.key} onclick={() => setView(v.key)}>{v.label}</button>
+      <button class:active={app.view === v.key} onclick={() => setView(v.key)}>
+        {v.label}{#if v.key === 'export' && exportCount > 0}<span class="badge">{exportCount}</span>{/if}
+      </button>
     {/each}
   </nav>
 
@@ -46,6 +51,14 @@
     >
       Detailed
     </button>
+    <button
+      class="toggle"
+      class:active={app.selectMode}
+      title="Select entries for export"
+      onclick={() => setSelectMode(!app.selectMode)}
+    >
+      Select
+    </button>
   {/if}
 
   <span class="counts mono">
@@ -56,8 +69,8 @@
     {/if}
   </span>
 
-  <button class="icon" onclick={reloadState} title="Reload state">⟳</button>
   <button class="icon" onclick={toggleTheme} title="Toggle theme">◐</button>
+  <Menu />
 </header>
 
 <style>
@@ -119,6 +132,18 @@
   .counts {
     font-size: var(--fs-xs);
     color: var(--text-3);
+  }
+
+  .badge {
+    display: inline-block;
+    min-width: 16px;
+    margin-left: 5px;
+    padding: 0 4px;
+    border-radius: var(--r-full);
+    background: var(--accent-soft);
+    color: var(--accent-text);
+    font-size: var(--fs-xs);
+    line-height: 16px;
   }
 
   .icon {
