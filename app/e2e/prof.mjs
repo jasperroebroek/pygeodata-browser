@@ -1,0 +1,26 @@
+import { createRequire } from 'module';
+const require = createRequire('/usr/local/lib/node_modules/');
+const { chromium } = require('playwright');
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+const net = [];
+page.on('requestfinished', (r) => { if (r.url().includes('class-entries')) { const t = r.timing(); net.push(Math.round(t.responseEnd)); } });
+await page.goto(process.argv[2] ?? 'http://localhost:5173/', { waitUntil: 'networkidle' });
+await page.click('.class-card[title="CountPrediction"]');
+await page.waitForSelector('tr.row-entry');
+await page.waitForTimeout(1500);
+const client = await page.context().newCDPSession(page);
+await client.send('Profiler.enable'); await client.send('Profiler.start');
+const t0 = Date.now();
+const n = await page.locator('tr.row-entry').count();
+await page.locator('.main-pane .table-scroll').evaluate((el) => (el.scrollTop = el.scrollHeight));
+await page.waitForFunction((n) => document.querySelectorAll('tr.row-entry').length > n, n, { timeout: 60000 });
+console.log('page append', Date.now() - t0, 'ms; net(ms)', net.slice(-1));
+const { profile } = await client.send('Profiler.stop');
+// aggregate self time by function
+const byId = new Map(profile.nodes.map((n) => [n.id, n]));
+const self = new Map();
+const dt = profile.timeDeltas; 
+profile.samples.forEach((id, i) => { const n = byId.get(id); const k = `${n.callFrame.functionName || '(anon)'} ${n.callFrame.url.split('/').pop()}:${n.callFrame.lineNumber}`; self.set(k, (self.get(k) ?? 0) + (dt[i] ?? 0)); });
+console.log([...self.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15).map(([k, v]) => `${(v / 1000).toFixed(0).padStart(6)}ms ${k}`).join('\n'));
+await browser.close();
