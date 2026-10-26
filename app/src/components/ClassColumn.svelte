@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { app, selectClasses, toggleHideStale, toggleShowEmpty } from '../lib/stores.svelte';
+  import { app, selectClasses, toggleHideStale, toggleShowEmpty, clearAllFilters, setVersionFilter, setFilters } from '../lib/stores.svelte';
   import type { ClassCard } from '../lib/api';
+  import { toggleSpecFilter } from '../lib/stores.svelte';
   import FilterPanel from './FilterPanel.svelte';
 
   let search = $state('');
@@ -37,6 +38,35 @@
     search ? cards.filter((c) => c.class_name.toLowerCase().includes(search.toLowerCase())) : cards,
   );
 
+  const activeFilters = $derived.by(() => {
+    const out: { key: string; label: string; title: string; clear: () => void }[] = [];
+    for (const f of app.filters) {
+      if (f.value || f.target === 'has_warnings' || f.target === 'has_error') {
+        out.push({
+          key: `f:${f.target}:${f.operator}:${f.value}`,
+          label: `${f.target.replace(/_/g, ' ')} ${f.operator.replace(/_/g, ' ')} ${f.value || ''}`.trim(),
+          title: 'Remove this filter',
+          clear: () => setFilters(app.filters.filter((x) => x !== f)),
+        });
+      }
+    }
+    for (const [dim, values] of Object.entries(app.specFilters)) {
+      for (const v of values) {
+        out.push({
+          key: `s:${dim}:${v}`,
+          label: v,
+          title: `Spec filter: ${dim}`,
+          clear: () => toggleSpecFilter(dim, v),
+        });
+      }
+    }
+    if (app.versionFilter) {
+      const label = app.payload?.version_options.find((x) => x.version_id === app.versionFilter)?.label ?? 'snapshot';
+      out.push({ key: 'v', label, title: 'Snapshot filter', clear: () => setVersionFilter(null) });
+    }
+    return out;
+  });
+
   const visible = $derived(
     app.showEmpty || app.selectedClasses.length > 0
       ? filtered
@@ -49,6 +79,14 @@
     <input type="search" placeholder="Filter classes…" bind:value={search} />
   </div>
 
+  {#if activeFilters.length > 0}
+    <div class="active-filters">
+      {#each activeFilters as f (f.key)}
+        <button class="active-pill" title={f.title} onclick={f.clear}>{f.label} ✕</button>
+      {/each}
+      <button class="clear-all" onclick={clearAllFilters}>Clear all</button>
+    </div>
+  {/if}
   <FilterPanel />
 
   <div class="toggles">
@@ -118,6 +156,36 @@
   input:focus {
     outline: 1.5px solid var(--accent);
     border-color: transparent;
+  }
+
+  .active-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: var(--s-2);
+    border-bottom: 1px solid var(--border);
+    background: var(--accent-softer);
+  }
+
+  .active-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: var(--r-full);
+    background: var(--accent-soft);
+    color: var(--accent-text);
+    font-size: var(--fs-xs);
+  }
+
+  .active-pill:hover {
+    background: var(--bg-active);
+  }
+
+  .clear-all {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    text-decoration: underline;
   }
 
   .toggles {

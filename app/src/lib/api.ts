@@ -184,6 +184,7 @@ export interface DashboardRequest {
   hide_stale?: boolean;
   version_filter?: string | null;
   include_rows?: boolean;
+  auto_open?: boolean;
 }
 
 async function postJSON<T>(url: string, body: unknown): Promise<T> {

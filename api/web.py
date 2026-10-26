@@ -219,6 +219,7 @@ def api_dashboard():
             logic_mode=payload.get('logic_mode', 'AND'),
             row_display=payload.get('row_display', 'none'),
             include_rows=bool(payload.get('include_rows', True)),
+            auto_open=bool(payload.get('auto_open', False)),
             hide_stale=bool(payload.get('hide_stale', False)),
             version_filter=payload.get('version_filter') or None,
         ),

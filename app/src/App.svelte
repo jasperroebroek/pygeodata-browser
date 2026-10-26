@@ -12,11 +12,22 @@
 
 <div class="shell">
   <TopBar />
-  {#if app.loading}
+  {#if app.loading || app.reconciling}
     <div class="progress-row" data-loading>
       {#if app.bootstrap.length > 0}
-        <div class="progress-bar"><div class="progress-fill" data-indeterminate></div></div>
-        <span class="progress-label">Building full state…</span>
+        {@const done = (app.progress.done ?? 0) / Math.max(app.progress.total ?? 0, 1)}
+        <div class="progress-bar">
+          <div class="progress-fill" style={app.progress.total ? `width: ${(done * 100).toFixed(1)}%` : ''} data-has-total={!!app.progress.total}></div>
+        </div>
+        <span class="progress-label">
+          {#if app.reconciling && !app.loading}
+            Reconciling…
+          {:else if app.progress.total}
+            {app.progress.done ?? 0}/{app.progress.total} entries
+          {:else}
+            Building full state…
+          {/if}
+        </span>
       {:else}
         <div class="boot-screen">
           <div class="boot-title">Registry</div>
@@ -52,7 +63,7 @@
 
   .columns {
     display: grid;
-    grid-template-columns: 240px minmax(0, 1fr) minmax(0, 1.2fr);
+    grid-template-columns: 300px minmax(0, 1fr) minmax(0, 1.2fr);
     flex: 1;
     min-height: 0;
   }
@@ -82,6 +93,9 @@
     width: 34%;
     background: var(--accent);
     border-radius: var(--r-full);
+  }
+
+  .progress-fill:not([data-has-total='true']) {
     animation: slide 1.1s var(--ease) infinite;
   }
 

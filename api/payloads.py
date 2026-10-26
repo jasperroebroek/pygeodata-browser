@@ -599,6 +599,7 @@ def build_browser_payload(
     hide_stale: bool = False,
     version_filter: str | None = None,  # version_id of the selected version, or None for all
     include_rows: bool = True,  # False: skip table rows when nothing is selected (per-class queries)
+    auto_open: bool = False,  # with one selected class, open its first visible entry in the same response
 ) -> dict:
     vreg = state.version_registry
     parsed_filters = parse_filters(filters)
@@ -630,6 +631,10 @@ def build_browser_payload(
         hide_stale=hide_stale,
         snapshot_filter=dep_hash_set,
     )
+
+    # Auto-open: selecting a class opens its first visible entry (single round trip)
+    if auto_open and not selected_entry and len(selected_classes) == 1 and visible_groups:
+        selected_entry = visible_groups[0][1][0].record_id
 
     # Validate selected_entry is still visible
     if selected_entry and selected_entry not in state.entries:

@@ -22,8 +22,10 @@ export const app = $state({
 
   ready: false,
   loading: true,
+  reconciling: false,
   loadError: null as string | null,
   fast: false,
+  progress: {} as { done?: number; total?: number },
 
   bootstrap: [] as BootstrapRow[],
   payload: null as DashboardPayload | null,
@@ -31,7 +33,7 @@ export const app = $state({
   selectedClasses: [] as string[],
   selectedEntry: null as string | null,
   kindFilter: 'all' as KindFilter,
-  rowDisplay: 'none' as 'none' | 'all',
+  rowDisplay: (window.innerWidth >= 1200 ? 'all' : 'none') as 'none' | 'all',
   classSearch: '',
 
   filters: [] as FilterRow[],
@@ -68,12 +70,13 @@ export function toggleTheme() {
 
 let refreshSeq = 0;
 
-export async function refreshDashboard() {
+export async function refreshDashboard(extra: DashboardRequest = {}) {
   const seq = ++refreshSeq;
   const body: DashboardRequest = {
+    ...extra,
     selected_classes: app.selectedClasses,
     selected_entry: app.selectedEntry,
-    kind_filter: app.kindFilter,
+    kind_filter: app.kindFilter === 'all' ? 'all' : app.kindFilter.toLowerCase(),
     row_display: app.rowDisplay,
     filters: app.filters,
     logic_mode: app.logicMode,
@@ -84,36 +87,40 @@ export async function refreshDashboard() {
     // the backend skips enrichment entirely (fast class counts only).
     include_rows: app.selectedClasses.length > 0,
   };
-  for (let attempt = 0; attempt < 60; attempt++) {
+  for (let attempt = 0; attempt < 120; attempt++) {
     const res = await fetch('/api/dashboard', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    // 202 = still loading: keep the last payload on screen instead of a stub
+    // 202 = the backend is reconciling: keep the last payload on screen and
+    // show the slim progress bar instead of silently blocking the click.
     if (res.status === 202) {
+      app.reconciling = true;
       await new Promise((r) => setTimeout(r, 500));
       continue;
     }
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     const payload = (await res.json()) as DashboardPayload;
+    app.reconciling = false;
     if (seq === refreshSeq) app.payload = payload;
     return payload;
   }
+  app.reconciling = false;
   return app.payload;
 }
 
 export async function selectClasses(classes: string[], opts: { autoOpen?: boolean } = {}) {
   app.selectedClasses = classes;
-  // Explicit requirement: clicking a class auto-opens its first table row.
-  if (opts.autoOpen !== false && classes.length > 0) {
-    const payload = await refreshDashboard();
-    const firstHeader = payload?.table_rows.find((r) => r.row_type === 'header');
-    app.selectedEntry = firstHeader?.record_id ?? null;
-  } else {
+  // Explicit requirement: clicking a class auto-opens its first table row —
+  // resolved server-side (auto_open) so it costs a single request.
+  const autoOpen = opts.autoOpen !== false && classes.length > 0;
+  if (!autoOpen) {
     app.selectedEntry = null;
   }
-  await refreshDashboard();
+  app.selectedEntry = null;
+  const payload = await refreshDashboard({ auto_open: autoOpen });
+  app.selectedEntry = autoOpen ? (payload?.selected_entry ?? null) : null;
 }
 
 export async function selectEntry(recordId: string | null) {
@@ -162,6 +169,14 @@ export async function toggleHideStale() {
 
 export function toggleShowEmpty() {
   app.showEmpty = !app.showEmpty;
+}
+
+export async function clearAllFilters() {
+  app.filters = [];
+  app.specFilters = {};
+  app.versionFilter = null;
+  app.hideStale = false;
+  await refreshDashboard();
 }
 
 export function setSelectMode(on: boolean) {
@@ -217,6 +232,7 @@ export function pollStatus() {
       const status: StatusPayload = await api.status();
       app.fast = status.fast;
       app.loadError = status.load_error;
+      app.progress = status.progress ?? {};
       if (status.ready) {
         if (statusTimer) clearInterval(statusTimer);
         statusTimer = null;

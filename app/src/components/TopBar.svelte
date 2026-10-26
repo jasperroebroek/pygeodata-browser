@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, setKindFilter, setRowDisplay, setSelectMode, toggleTheme } from '../lib/stores.svelte';
+  import { app, setKindFilter, setRowDisplay, setSelectMode, toggleHideStale, toggleTheme } from '../lib/stores.svelte';
   import Menu from './Menu.svelte';
   import type { KindFilter } from '../lib/stores.svelte';
 
@@ -58,6 +58,14 @@
       onclick={() => setSelectMode(!app.selectMode)}
     >
       Select
+    </button>
+    <button
+      class="toggle"
+      class:active={app.hideStale}
+      title="Hide entries whose dependencies changed"
+      onclick={toggleHideStale}
+    >
+      Hide stale
     </button>
   {/if}
 
