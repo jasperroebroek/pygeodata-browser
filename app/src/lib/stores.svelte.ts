@@ -80,6 +80,9 @@ export async function refreshDashboard() {
     spec_filters: app.specFilters,
     hide_stale: app.hideStale,
     version_filter: app.versionFilter,
+    // Per-class queries: with nothing selected the table rows are not needed;
+    // the backend skips enrichment entirely (fast class counts only).
+    include_rows: app.selectedClasses.length > 0,
   };
   for (let attempt = 0; attempt < 60; attempt++) {
     const res = await fetch('/api/dashboard', {

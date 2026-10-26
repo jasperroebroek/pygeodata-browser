@@ -29,7 +29,9 @@
   // fall back to the entries currently visible there.
   const cartActive = $derived(app.selectedEntries.length > 0);
   const baseIds = $derived(
-    cartActive ? app.selectedEntries : (app.payload?.visible_entry_ids ?? fallbackIds ?? []),
+    cartActive
+      ? app.selectedEntries
+      : (app.payload?.visible_entry_ids?.length ? app.payload.visible_entry_ids : (fallbackIds ?? [])),
   );
   const exportIds = $derived(new Set(baseIds.filter((id) => !excluded.has(id))));
   const count = $derived(exportIds.size);
@@ -55,10 +57,13 @@
   // Read-only import of the shared stores: when the payload is still null
   // (fresh load), fetch a dashboard snapshot ourselves.
   $effect(() => {
-    if (app.payload) return;
+    // With nothing selected the shell requests include_rows:false (fast counts),
+    // so fetch the full visible set ourselves — once.
+    if (app.payload && (app.payload.visible_entry_ids?.length || cartActive)) return;
+    if (fallbackIds !== null) return;
     let cancelled = false;
     api
-      .dashboard({})
+      .dashboard({ include_rows: true })
       .then((p) => {
         if (!cancelled && Array.isArray(p.visible_entry_ids)) fallbackIds = p.visible_entry_ids;
       })

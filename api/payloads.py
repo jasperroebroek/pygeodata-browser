@@ -5,8 +5,8 @@ from pygeodata.catalog.types import ClassInfo, EntryInfo, FileRef, LinkedEntry
 from pygeodata.formatting.json import format_json
 from pygeodata.registries.registry import SourceRegistry
 from pygeodata.registries.versioning import VersionRegistry
-from pygeodata_browser.state import AppState
 from pygeodata.spec import SpecKeys
+from pygeodata_browser.state import AppState
 
 # ---------------------------------------------------------------------------
 # Small serialisers — one responsibility each
@@ -132,6 +132,15 @@ def _sidebar_counts(
     hide_stale: bool = False,
     snapshot_filter: list[str] | None = None,
 ) -> dict[str, int]:
+    store = getattr(state.entries, 'count_by_class', None)
+    if store is not None and not filters and not spec_filters:
+        # Fast path: identity-column counts; per-entry display never loads.
+        return state.entries.count_by_class(
+            kind_filter=kind_filter,
+            snapshot_dep_hashes=set(snapshot_filter) if snapshot_filter else None,
+            hide_stale=hide_stale,
+            object_type_by_class={name: ci.object_type for name, ci in state.classes.items()},
+        )
     counts: dict[str, int] = {}
     for class_name, class_info in state.classes.items():
         if kind_filter != 'all' and (class_info.object_type or '').lower() != kind_filter:
@@ -217,7 +226,17 @@ def _build_class_cards(
     # When a snapshot filter is active, derive stale status from the visible entries:
     # a class is stale if any of its snapshot entries have dep_hash_stale=True.
     snapshot_stale_classes: set[str] = set()
-    if snapshot_dep_hashes is not None:
+    if snapshot_dep_hashes is not None and hasattr(state.entries, 'dep_hashes'):
+        for class_name in state.entry_registry.class_names:
+            if class_name in snapshot_stale_classes:
+                continue
+            for rec in state.entries.records_for_class(class_name):
+                if rec.dependency_tree_hash in snapshot_dep_hashes and state.entries.dep_hash_stale(
+                    class_name, rec.dependency_tree_hash
+                ):
+                    snapshot_stale_classes.add(class_name)
+                    break
+    elif snapshot_dep_hashes is not None:
         for entry in state.entries.values():
             if entry.dep_hash in snapshot_dep_hashes and entry.dep_hash_stale:
                 snapshot_stale_classes.add(entry.class_name)
@@ -225,9 +244,12 @@ def _build_class_cards(
     class_cards = []
     for class_name, class_info in sorted(state.classes.items()):
         record_ids = state.get_state_hashes(class_name)
-        format_version_stale = any(
-            state.entries[rid].format_version_stale for rid in record_ids if rid in state.entries
-        )
+        if hasattr(state.entries, 'format_version_stale'):
+            format_version_stale = any(state.entries.format_version_stale(rid) for rid in record_ids)
+        else:
+            format_version_stale = any(
+                state.entries[rid].format_version_stale for rid in record_ids if rid in state.entries
+            )
         if snapshot_dep_hashes is not None:
             source_stale = class_name in snapshot_stale_classes
             deps_stale = False
@@ -481,17 +503,37 @@ def _build_detail_payload(
             return None
         siblings: list[EntryInfo] = []
         if selected_entry_info.instance_hash:
-            index = _build_instance_hash_index(state.entries)
-            siblings = [
-                e
-                for e in index.get(selected_entry_info.instance_hash, [])
-                if e.record_id != selected_entry_info.record_id
-            ]
+            ids_by_instance = getattr(state.entries, 'ids_by_instance_hash', None)
+            if ids_by_instance is not None:
+                sibling_ids = sorted(
+                    (
+                        rid
+                        for rid in ids_by_instance(selected_entry_info.instance_hash)
+                        if rid != selected_entry_info.record_id
+                    ),
+                )
+                siblings = [state.entries.get(rid) for rid in sibling_ids if rid in state.entries]
+            else:
+                index = _build_instance_hash_index(state.entries)
+                siblings = [
+                    e
+                    for e in index.get(selected_entry_info.instance_hash, [])
+                    if e.record_id != selected_entry_info.record_id
+                ]
         dep_version_entries: list[EntryInfo] = []
         if selected_entry_info.params_hash and selected_entry_info.spec_hash:
-            ph_index = _build_params_hash_index(state.entries)
-            key = (selected_entry_info.class_name, selected_entry_info.params_hash, selected_entry_info.spec_hash)
-            dep_version_entries = list(ph_index.get(key, []))
+            ids_by_params = getattr(state.entries, 'ids_by_params_hash', None)
+            if ids_by_params is not None:
+                dep_ids = sorted(
+                    ids_by_params(
+                        selected_entry_info.class_name, selected_entry_info.params_hash, selected_entry_info.spec_hash
+                    )
+                )
+                dep_version_entries = [state.entries.get(rid) for rid in dep_ids if rid in state.entries]
+            else:
+                ph_index = _build_params_hash_index(state.entries)
+                key = (selected_entry_info.class_name, selected_entry_info.params_hash, selected_entry_info.spec_hash)
+                dep_version_entries = list(ph_index.get(key, []))
             dep_version_entries.sort(
                 key=lambda e: (
                     vreg.version_for_dep_hash(e.dep_hash).mtime
@@ -550,21 +592,27 @@ def build_browser_payload(
     row_display: str,
     hide_stale: bool = False,
     version_filter: str | None = None,  # version_id of the selected version, or None for all
+    include_rows: bool = True,  # False: skip table rows when nothing is selected (per-class queries)
 ) -> dict:
     vreg = state.version_registry
     parsed_filters = parse_filters(filters)
     version_obj = vreg.version_by_id(version_filter) if version_filter else None
     dep_hash_set = vreg.dep_hashes_for_version(version_obj) if version_obj is not None else None
 
-    visible_groups = _build_visible_groups(
-        state,
-        selected_classes=selected_classes,
-        kind_filter=kind_filter,
-        spec_filters=spec_filters,
-        filters=parsed_filters,
-        logic_mode=logic_mode,
-        hide_stale=hide_stale,
-        snapshot_filter=dep_hash_set,
+    skip_rows = include_rows is False and not selected_classes
+    visible_groups = (
+        []
+        if skip_rows
+        else _build_visible_groups(
+            state,
+            selected_classes=selected_classes,
+            kind_filter=kind_filter,
+            spec_filters=spec_filters,
+            filters=parsed_filters,
+            logic_mode=logic_mode,
+            hide_stale=hide_stale,
+            snapshot_filter=dep_hash_set,
+        )
     )
 
     sidebar_counts = _sidebar_counts(
@@ -581,10 +629,20 @@ def build_browser_payload(
     if selected_entry and selected_entry not in state.entries:
         selected_entry = None
 
-    visible_entry_ids = [e.record_id for _, entries in visible_groups for e in entries]
+    visible_entry_ids = [] if skip_rows else [e.record_id for _, entries in visible_groups for e in entries]
     selected_entry_info = state.entries.get(selected_entry) if selected_entry else None
 
-    stale_hidden = sum(1 for e in state.entries.values() if e.dep_hash_stale) if hide_stale else 0
+    if hide_stale:
+        if hasattr(state.entries, 'records_for_class'):
+            stale_hidden = 0
+            for class_name in state.entry_registry.class_names:
+                for rec in state.entries.records_for_class(class_name):
+                    if rec.dependency_tree_hash and state.entries.dep_hash_stale(class_name, rec.dependency_tree_hash):
+                        stale_hidden += 1
+        else:
+            stale_hidden = sum(1 for e in state.entries.values() if e.dep_hash_stale)
+    else:
+        stale_hidden = 0
     diagnostics = {**state.diagnostics, 'stale_hidden': stale_hidden}
 
     return {
@@ -617,8 +675,8 @@ def build_browser_payload(
             'classes': len(state.classes),
             'classes_loaded': sum(1 for c in state.classes.values() if c.loaded),
             'entries': len(state.entries),
-            'visible_classes': len(visible_groups),
-            'visible_entries': len(visible_entry_ids),
+            'visible_classes': len(sidebar_counts) if skip_rows else len(visible_groups),
+            'visible_entries': sum(sidebar_counts.values()) if skip_rows else len(visible_entry_ids),
         },
         'visible_entry_ids': visible_entry_ids,
     }

@@ -183,6 +183,7 @@ export interface DashboardRequest {
   row_display?: 'none' | 'all' | 'selected';
   hide_stale?: boolean;
   version_filter?: string | null;
+  include_rows?: boolean;
 }
 
 async function postJSON<T>(url: string, body: unknown): Promise<T> {

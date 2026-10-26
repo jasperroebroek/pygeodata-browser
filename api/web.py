@@ -13,11 +13,10 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 from flask import Flask, Response, abort, jsonify, render_template, request, send_file
-from werkzeug.exceptions import HTTPException
-
 from pygeodata.cache import clean_cache, clean_source_registry
 from pygeodata.catalog import store
 from pygeodata.config import FORMAT_VERSION, get_config
+from pygeodata.tracked_object import TrackedObject
 from pygeodata_browser import code_service, export_service, payloads
 from pygeodata_browser.logging import configure_logging
 from pygeodata_browser.path_actions import open_path, reveal_path
@@ -28,7 +27,7 @@ from pygeodata_browser.popups import (
     build_source_popup,
 )
 from pygeodata_browser.state import AppContext
-from pygeodata.tracked_object import TrackedObject
+from werkzeug.exceptions import HTTPException
 
 _ctx: AppContext = AppContext()  # replaced by create_app() on startup
 
@@ -187,6 +186,7 @@ def api_dashboard():
             filters=payload.get('filters', []),
             logic_mode=payload.get('logic_mode', 'AND'),
             row_display=payload.get('row_display', 'none'),
+            include_rows=bool(payload.get('include_rows', True)),
             hide_stale=bool(payload.get('hide_stale', False)),
             version_filter=payload.get('version_filter') or None,
         ),
@@ -249,7 +249,11 @@ def api_code_versions():
         return _loading()
     from pygeodata.tracked_object import TrackedObject
 
-    entry_dep_hashes = {e.dep_hash for e in _ctx.state.entries.values() if e.dep_hash}
+    _entries = _ctx.state.entries
+    if hasattr(_entries, 'dep_hashes'):
+        entry_dep_hashes = _entries.dep_hashes()
+    else:
+        entry_dep_hashes = {e.dep_hash for e in _entries.values() if e.dep_hash}
     return jsonify(
         {
             'versions': payloads.version_groups_payload(_ctx.state.version_registry, entry_dep_hashes),
