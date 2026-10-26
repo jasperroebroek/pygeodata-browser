@@ -6,7 +6,7 @@ export interface SpecPayload {
   resolution_display: string | null;
   shape: string | null;
   bounds: string | null;
-  bounds_latlon: string | null;
+  bounds_latlon: number[] | null;
   bounds_display: string | null;
 }
 
@@ -53,21 +53,48 @@ export interface FilePayload {
   kind: string;
 }
 
+export interface ParamRow {
+  group: string;
+  parameter: string;
+  value: string;
+  value_type?: string;
+  param_row_type?: string;
+  path?: string;
+  depth?: number;
+}
+
 export interface LinkedEntry {
   param_name: string;
   class_name: string;
-  state_hash: string;
-  params_summary: string;
+  state_hash: string | null;
+  params_summary: Record<string, string>;
 }
 
 export interface CoOutput {
-  class_name: string;
   record_id: string;
-  rows: { group: string; parameter: string; value: string }[];
+  class_name: string;
+  object_type?: string;
+  state_hash: string | null;
+  primary_file: FilePayload | null;
+  rows: ParamRow[];
+  diff_rows: ParamRow[];
 }
 
 export interface SameInstanceRun {
   record_id: string;
+  class_name: string;
+  state_hash: string | null;
+  primary_file: FilePayload | null;
+  spec: SpecPayload;
+}
+
+export interface DepVersionSibling {
+  record_id: string;
+  dep_hash: string;
+  dep_hash_stale: boolean;
+  version_id: string | null;
+  version_label: string | null;
+  is_self: boolean;
   spec: SpecPayload;
 }
 
@@ -91,7 +118,7 @@ export interface EntryDetail {
   table_preview: string | null;
   co_outputs: CoOutput[];
   same_instance_runs: SameInstanceRun[];
-  rows: { group: string; parameter: string; value: string; value_type: string; path: string; depth: number }[];
+  rows: ParamRow[];
   params_tree: Record<string, unknown>;
   linked_entries: LinkedEntry[];
 }
@@ -113,15 +140,7 @@ export interface DetailPayload {
   code_versions: { source_hash: string; mtime: string; is_version_change: boolean }[];
   entry_version_id: string | null;
   entry_version_label: string | null;
-  dep_version_siblings?: {
-    record_id: string;
-    dep_hash: string;
-    dep_hash_stale: boolean;
-    version_id: string | null;
-    version_label: string | null;
-    is_self: boolean;
-    spec: SpecPayload;
-  }[];
+  dep_version_siblings?: DepVersionSibling[];
   selected_entry: EntryDetail | null;
 }
 
@@ -134,15 +153,19 @@ export interface VersionOption {
   has_entries: boolean;
 }
 
-export interface DashboardPayload {
-  selected_classes: string[];
-  selected_entry: string | null;
+export interface StatusPayload {
+  ready: boolean;
+  progress: { done?: number; total?: number; reimport_done?: number; reimport_total?: number };
+  load_error: string | null;
+  has_live_classes: boolean;
+  fast: boolean;
+}
+
+export interface ClassesPayload {
   class_cards: ClassCard[];
-  table_rows: TableRow[];
-  detail: DetailPayload | null;
-  diagnostics: Record<string, unknown>;
-  spec_options: Record<string, string[]>;
+  spec_options: Record<string, (string | { value: string; label: string })[]>;
   version_options: VersionOption[];
+  diagnostics: Record<string, unknown>;
   counts: {
     classes: number;
     classes_loaded: number;
@@ -150,15 +173,13 @@ export interface DashboardPayload {
     visible_classes: number;
     visible_entries: number;
   };
-  visible_entry_ids: string[];
 }
 
-export interface StatusPayload {
-  ready: boolean;
-  progress: { done?: number; total?: number };
-  load_error: string | null;
-  has_live_classes: boolean;
-  fast: boolean;
+export interface EntriesPagePayload {
+  table_rows: TableRow[];
+  total: number;
+  offset: number;
+  limit: number;
 }
 
 export interface BootstrapRow {
@@ -171,20 +192,6 @@ export interface BootstrapRow {
   params_hash: string | null;
   spec_hash: string | null;
   created_at: number | null;
-}
-
-export interface DashboardRequest {
-  selected_classes?: string[];
-  selected_entry?: string | null;
-  kind_filter?: string;
-  spec_filters?: Record<string, string[]>;
-  filters?: { target: string; operator: string; value: string }[];
-  logic_mode?: 'AND' | 'OR' | 'NOT';
-  row_display?: 'none' | 'all' | 'selected';
-  hide_stale?: boolean;
-  version_filter?: string | null;
-  include_rows?: boolean;
-  auto_open?: boolean;
 }
 
 async function postJSON<T>(url: string, body: unknown): Promise<T> {
@@ -207,22 +214,37 @@ export const api = {
   status: () => getJson<StatusPayload>('/api/status'),
   bootstrap: () => getJson<BootstrapRow[]>('/api/bootstrap'),
 
-  dashboard(body: DashboardRequest = {}): Promise<DashboardPayload> {
-    return fetch('/api/dashboard', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }).then((res) => {
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      return res.json() as Promise<DashboardPayload>;
-    });
+  classes(params: Record<string, string> = {}): Promise<ClassesPayload> {
+    const q = new URLSearchParams(params);
+    return getJson<ClassesPayload>(`/api/classes?${q.toString()}`);
   },
 
+  classEntries(params: Record<string, string> = {}): Promise<EntriesPagePayload> {
+    const q = new URLSearchParams(params);
+    return getJson<EntriesPagePayload>(`/api/class-entries?${q.toString()}`);
+  },
+
+  entryDetail(recordId: string): Promise<DetailPayload> {
+    return getJson<DetailPayload>(`/api/entry/${encodeURIComponent(recordId)}`);
+  },
+
+  thumbUrl: (recordId: string, width = 720) => `/api/thumb/${encodeURIComponent(recordId)}?w=${width}`,
+
   popupJson: (path: string) =>
-    getJson<Record<string, unknown>>(`/api/popup/json?path=${encodeURIComponent(path)}`),
+    getJson<{ title: string; json: unknown }>(`/api/popup/json?path=${encodeURIComponent(path)}`),
+
+  popupGraph: (className: string, graphPath: string | null) =>
+    getJson<{ title: string; svg?: string; pdf_path?: string }>(
+      `/api/popup/graph?class_name=${encodeURIComponent(className)}` +
+        (graphPath ? `&graph_path=${encodeURIComponent(graphPath)}` : ''),
+    ),
 
   fileUrl: (path: string) => `/api/file?path=${encodeURIComponent(path)}`,
-  boundsMapUrl: (crs: string) => `/api/bounds-map?crs=${encodeURIComponent(crs)}`,
+  boundsMapUrl: (bounds: number[], crs: string) =>
+    `/api/bounds-map?bounds=${encodeURIComponent(JSON.stringify(bounds))}&crs=${encodeURIComponent(crs)}`,
+
+  openPath: (path: string) => postJSON('/api/open', { path }),
+  revealPath: (path: string) => postJSON('/api/reveal', { path }),
 
   rebuild: (reimport: boolean) =>
     postJSON('/api/rebuild', { reimport }),

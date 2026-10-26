@@ -37,7 +37,7 @@ pygeodata_browser = "api"
 pygeodata_browser = [
     "static/**/*",
     "templates/**/*",
-]
+]  # static/app/* is the built Svelte frontend (app/ is its source)
 
 [tool.setuptools.exclude-package-data]
 pygeodata_browser = [".DS_Store", "**/.DS_Store"]

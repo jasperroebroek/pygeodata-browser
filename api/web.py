@@ -30,7 +30,13 @@ from pygeodata.tracked_object import TrackedObject
 from pygeodata_browser import code_service, export_service, payloads
 from pygeodata_browser.logging import configure_logging
 from pygeodata_browser.path_actions import open_path, reveal_path
-from pygeodata_browser.payloads import _build_table_rows, build_browser_payload
+from pygeodata_browser.payloads import (
+    _build_table_rows,
+    build_browser_payload,
+    build_classes_payload,
+    build_entries_page_payload,
+    build_entry_detail_payload,
+)
 from pygeodata_browser.popups import (
     build_graph_popup,
     build_json_popup,
@@ -170,10 +176,22 @@ def api_bounds_map():
     )
 
 
+def _within(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+    except (ValueError, OSError):
+        return False
+    return True
+
+
 @app.get('/api/file')
 def api_file():
     path = _assert_allowed_path(request.args['path'])
-    return send_file(path)
+    resp = send_file(path)
+    # Cache-root artifacts are content-addressed by state_hash: immutable forever.
+    if any(_within(path, root) for root in get_config().cache_roots):
+        resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    return resp
 
 
 @app.post('/api/open')
@@ -224,6 +242,123 @@ def api_dashboard():
             version_filter=payload.get('version_filter') or None,
         ),
     )
+
+
+def _query_json(name: str, default):
+    raw = request.args.get(name)
+    if not raw:
+        return default
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        abort(400)
+
+
+@app.get('/api/classes')
+def api_classes():
+    """Class cards + filter options — changes only on reload or filter change."""
+    if _ctx.is_loading() or _ctx.state is None:
+        return _loading()
+    return jsonify(
+        build_classes_payload(
+            _ctx.state,
+            kind_filter=request.args.get('kind_filter', 'all'),
+            spec_filters=_query_json('spec_filters', {}),
+            filters=_query_json('filters', []),
+            logic_mode=request.args.get('logic_mode', 'AND'),
+            hide_stale=request.args.get('hide_stale') == '1',
+            version_filter=request.args.get('version_filter') or None,
+        ),
+    )
+
+
+@app.get('/api/class-entries')
+def api_class_entries():
+    """One paginated page of visible header rows across the selected classes."""
+    if _ctx.is_loading() or _ctx.state is None:
+        return _loading()
+    classes = [c for c in request.args.get('classes', '').split(',') if c]
+    ids_only = request.args.get('ids_only') == '1'
+    if not classes and not ids_only:
+        return jsonify({'table_rows': [], 'total': 0, 'offset': 0, 'limit': 0})
+    return jsonify(
+        build_entries_page_payload(
+            _ctx.state,
+            selected_classes=classes,
+            kind_filter=request.args.get('kind_filter', 'all'),
+            spec_filters=_query_json('spec_filters', {}),
+            filters=_query_json('filters', []),
+            logic_mode=request.args.get('logic_mode', 'AND'),
+            hide_stale=request.args.get('hide_stale') == '1',
+            version_filter=request.args.get('version_filter') or None,
+            offset=request.args.get('offset', 0, type=int),
+            limit=request.args.get('limit', 50, type=int),
+            row_display=request.args.get('row_display', 'none'),
+            selected_entry=request.args.get('selected_entry') or None,
+            ids_only=ids_only,
+            max_rows=request.args.get('max_rows', type=int),
+        ),
+    )
+
+
+@app.get('/api/entry/<record_id>')
+def api_entry_detail(record_id: str):
+    """Detail payload for a single entry; ETag revalidation instead of re-send."""
+    if _ctx.is_loading() or _ctx.state is None:
+        return _loading()
+    entry = _ctx.state.entries.get(record_id)
+    if entry is None:
+        abort(404)
+    vreg = _ctx.state.version_registry
+    etag = f'"{record_id[:16]}-{entry.dep_hash_stale:d}-{entry.format_version_stale:d}-{len(vreg.versions)}"'
+    if request.headers.get('If-None-Match') == etag:
+        return '', 304
+    detail = build_entry_detail_payload(_ctx.state, record_id=record_id)
+    if detail is None:
+        abort(404)
+    resp = jsonify(detail)
+    resp.headers['ETag'] = etag
+    # Staleness badges and code versions are volatile: revalidate, never serve stale.
+    resp.headers['Cache-Control'] = 'no-cache'
+    return resp
+
+
+_THUMB_WIDTHS = (360, 720)
+
+
+@app.get('/api/thumb/<record_id>')
+def api_thumb(record_id: str):
+    """Server-resized preview of an entry's primary image, cached under .source/thumbs."""
+    if _ctx.is_loading() or _ctx.state is None:
+        return _loading()
+    entry = _ctx.state.entries.get(record_id)
+    if entry is None or entry.primary_file is None or entry.primary_file.kind != 'image':
+        abort(404)
+    width = request.args.get('w', 720, type=int)
+    if width not in _THUMB_WIDTHS:
+        width = 720
+    source = Path(entry.primary_file.path)
+    _assert_allowed_path(str(source))
+
+    thumbs_dir = get_config().path_registry.resolve() / 'thumbs'
+    thumb_path = thumbs_dir / f'{record_id}_{width}.png'
+    if not thumb_path.exists():
+        import io
+
+        from PIL import Image
+
+        thumbs_dir.mkdir(parents=True, exist_ok=True)
+        with Image.open(source) as img:
+            img.thumbnail((width, width * 8))
+            buf = io.BytesIO()
+            img.convert('RGBA' if img.mode in ('RGBA', 'LA', 'P') else 'RGB').save(buf, 'PNG', optimize=True)
+        tmp_path = thumb_path.with_suffix('.tmp')
+        tmp_path.write_bytes(buf.getvalue())
+        tmp_path.replace(thumb_path)
+
+    resp = send_file(thumb_path)
+    resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    return resp
 
 
 @app.post('/api/rebuild')

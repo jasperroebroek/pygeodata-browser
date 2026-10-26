@@ -1,28 +1,59 @@
-import { app } from './stores.svelte';
+import { setView } from './stores.svelte';
 
-/** Jump to the code view with a class (optionally pinned to a source hash) open. */
-export function navigateToCodeClass(className: string, sourceHash?: string) {
-  app.codeTarget = { className, sourceHash };
-  app.diffRecordId = null;
-  app.view = 'code';
+export type BrowseMode = 'version' | 'class';
+export type CodeKind = 'all' | 'data' | 'table' | 'figure' | 'trackedobject';
+
+export interface CodeTarget {
+  className: string;
+  depHash?: string | null;
+  sourceHash?: string | null;
 }
 
-/** Jump to the code view showing the entry's version diff (what changed for it). */
-export function showWhatChanged(recordId: string) {
-  app.diffRecordId = recordId;
-  app.codeTarget = null;
-  app.view = 'code';
+function stored(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
 }
 
-/** Consume a pending code navigation target (CodeView calls this once). */
-export function takeCodeTarget() {
-  const target = app.codeTarget;
-  app.codeTarget = null;
-  return target;
+/** Code-view toolbar state; lives here because the top bar renders the controls. */
+export const codeUi = $state({
+  browseMode: (stored('code_browse_mode') === 'class' ? 'class' : 'version') as BrowseMode,
+  kindFilter: 'all' as CodeKind,
+  hideEmpty: stored('hide_empty_versions') === 'true',
+});
+
+export function setBrowseMode(mode: BrowseMode) {
+  codeUi.browseMode = mode;
+  localStorage.setItem('code_browse_mode', mode);
 }
 
-export function takeDiffRecordId() {
-  const id = app.diffRecordId;
-  app.diffRecordId = null;
-  return id;
+export function setHideEmpty(hide: boolean) {
+  codeUi.hideEmpty = hide;
+  localStorage.setItem('hide_empty_versions', hide ? 'true' : 'false');
+}
+
+export const codeNav = $state({
+  target: null as CodeTarget | null,
+  diffRecordId: null as string | null,
+  diffClassName: null as string | null,
+});
+
+/**
+ * Jump to the code view with a class open. depHash routes to the version the
+ * entry was computed at; sourceHash pins an exact snapshot.
+ */
+export function navigateToCodeClass(className: string, opts: { depHash?: string | null; sourceHash?: string | null } = {}) {
+  codeNav.target = { className, ...opts };
+  codeNav.diffRecordId = null;
+  setView('code');
+}
+
+/** Jump to the code view showing what changed in the code since an entry was computed. */
+export function showWhatChanged(recordId: string, className: string | null = null) {
+  codeNav.diffRecordId = recordId;
+  codeNav.diffClassName = className;
+  codeNav.target = null;
+  setView('code');
 }

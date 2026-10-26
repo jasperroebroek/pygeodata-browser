@@ -206,6 +206,40 @@ class EntryStore:
                 counts[class_name] = n
         return counts
 
+    def visible_ids(
+        self,
+        *,
+        selected_classes: list[str],
+        kind_filter: str,
+        snapshot_dep_hashes: set[str] | None,
+        hide_stale: bool,
+        object_type_by_class: dict[str, str | None],
+    ) -> list[str] | None:
+        """Visible record ids from identity columns only — no display JSON.
+
+        Valid only when no param filters and no spec filters are active; callers
+        must fall back to the enriched path otherwise. Returns None when this
+        store does not support the fast path (eager, non-catalog builds).
+        """
+        ids: list[str] = []
+        for class_name in sorted(self._records_by_class):
+            if selected_classes and class_name not in selected_classes:
+                continue
+            if kind_filter != 'all' and (object_type_by_class.get(class_name) or '').lower() != kind_filter:
+                continue
+            for rec in self._records_by_class[class_name]:
+                if rec.state_hash is None:
+                    continue
+                if snapshot_dep_hashes is not None and rec.dependency_tree_hash not in snapshot_dep_hashes:
+                    continue
+                if hide_stale and (
+                    (rec.dependency_tree_hash and self.dep_hash_stale(class_name, rec.dependency_tree_hash))
+                    or self.format_version_stale(rec.state_hash)
+                ):
+                    continue
+                ids.append(rec.state_hash)
+        return ids
+
 
 def _display_for_hashes(state_hashes: list[str]) -> dict[str, dict] | None:
     """Display payload for a specific set of entries, or None when the catalog is unusable."""

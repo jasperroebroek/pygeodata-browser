@@ -1,168 +1,124 @@
 <script lang="ts">
-  import { app, setKindFilter, setRowDisplay, setSelectMode, toggleHideStale, toggleTheme } from '../lib/stores.svelte';
+  import {
+    filterState,
+    layout,
+    selection,
+    setEntriesMode,
+    setKindFilter,
+    setParamDisplay,
+    setView,
+    toggleHideStale,
+    toggleSelectMode,
+    ui,
+  } from '../lib/stores.svelte';
+  import type { KindFilter, View } from '../lib/stores.svelte';
+  import { codeUi, setBrowseMode, setHideEmpty } from '../lib/nav.svelte';
+  import type { CodeKind } from '../lib/nav.svelte';
+  import { openModal } from '../lib/modal.svelte';
   import Menu from './Menu.svelte';
-  import type { KindFilter } from '../lib/stores.svelte';
 
-  const kinds: { key: KindFilter; label: string }[] = [
-    { key: 'all', label: 'All' },
-    { key: 'Data', label: 'Data' },
-    { key: 'Table', label: 'Tables' },
-    { key: 'Figure', label: 'Figures' },
-  ];
-
-  const views: { key: 'entries' | 'code' | 'export'; label: string }[] = [
+  const views: { key: View; label: string }[] = [
     { key: 'entries', label: 'Entries' },
     { key: 'code', label: 'Code' },
     { key: 'export', label: 'Export' },
   ];
 
-  const exportCount = $derived(app.selectedEntries.length);
+  const kinds: { key: KindFilter; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'data', label: 'Data' },
+    { key: 'table', label: 'Table' },
+    { key: 'figure', label: 'Figure' },
+  ];
 
-  function setView(view: 'entries' | 'code' | 'export') {
-    app.view = view;
-  }
+  const codeKinds: { key: CodeKind; label: string }[] = [...kinds, { key: 'trackedobject', label: 'Object' }];
+
+  const exportCount = $derived(selection.selectedEntries.length);
 </script>
 
-<header class="topbar">
-  <nav class="views">
-    {#each views as v}
-      <button class:active={app.view === v.key} onclick={() => setView(v.key)}>
-        {v.label}{#if v.key === 'export' && exportCount > 0}<span class="badge">{exportCount}</span>{/if}
-      </button>
-    {/each}
-  </nav>
-
-  {#if app.view === 'entries'}
-    <nav class="kinds">
-      {#each kinds as k}
-        <button class:active={app.kindFilter === k.key} onclick={() => setKindFilter(k.key)}>{k.label}</button>
+<nav class="topbar">
+  <div class="topbar-left">
+    <div class="view-tabs">
+      {#each views as v (v.key)}
+        <button class="view-tab" class:active={ui.view === v.key} onclick={() => setView(v.key)}>
+          {v.label}
+          {#if v.key === 'export' && exportCount > 0}<span class="tab-badge">{exportCount}</span>{/if}
+        </button>
       {/each}
-    </nav>
-  {/if}
-
-  <div class="spacer"></div>
-
-  {#if app.view === 'entries'}
-    <button
-      class="toggle"
-      class:active={app.rowDisplay === 'all'}
-      title="Show parameter rows inside the entries table"
-      onclick={() => setRowDisplay(app.rowDisplay === 'all' ? 'none' : 'all')}
-    >
-      Detailed
-    </button>
-    <button
-      class="toggle"
-      class:active={app.selectMode}
-      title="Select entries for export"
-      onclick={() => setSelectMode(!app.selectMode)}
-    >
-      Select
-    </button>
-    <button
-      class="toggle"
-      class:active={app.hideStale}
-      title="Hide entries whose dependencies changed"
-      onclick={toggleHideStale}
-    >
-      Hide stale
-    </button>
-  {/if}
-
-  <span class="counts mono">
-    {#if app.payload}
-      {app.payload.counts.visible_entries}/{app.payload.counts.entries} shown
-    {:else if app.bootstrap.length}
-      {app.bootstrap.length} classes (bootstrap)
+    </div>
+    <div class="topbar-sep"></div>
+    {#if ui.view === 'entries'}
+      <div class="topbar-toolbar-section">
+        <div class="kind-group">
+          {#each kinds as k (k.key)}
+            <button class="kind-tab" class:active={filterState.kindFilter === k.key} onclick={() => void setKindFilter(k.key)}>
+              {k.label}
+            </button>
+          {/each}
+        </div>
+      </div>
+    {:else if ui.view === 'code'}
+      <div class="topbar-toolbar-section">
+        <div class="kind-group">
+          <button class="kind-tab" class:active={codeUi.browseMode === 'version'} onclick={() => setBrowseMode('version')}>
+            By version
+          </button>
+          <button class="kind-tab" class:active={codeUi.browseMode === 'class'} onclick={() => setBrowseMode('class')}>
+            By class
+          </button>
+        </div>
+        <div class="kind-group">
+          {#each codeKinds as k (k.key)}
+            <button class="kind-tab" class:active={codeUi.kindFilter === k.key} onclick={() => (codeUi.kindFilter = k.key)}>
+              {k.label}
+            </button>
+          {/each}
+        </div>
+      </div>
     {/if}
-  </span>
-
-  <button class="icon" onclick={toggleTheme} title="Toggle theme">◐</button>
-  <Menu />
-</header>
-
-<style>
-  .topbar {
-    display: flex;
-    align-items: center;
-    gap: var(--s-3);
-    height: var(--topbar-h);
-    padding: 0 var(--s-3);
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-sidebar);
-    flex: none;
-  }
-
-  nav {
-    display: flex;
-    gap: 2px;
-  }
-
-  nav button {
-    padding: 4px 10px;
-    border-radius: var(--r-sm);
-    color: var(--text-2);
-    font-size: var(--fs-sm);
-  }
-
-  nav button:hover {
-    background: var(--bg-hover);
-  }
-
-  nav button.active {
-    background: var(--bg-active);
-    color: var(--text);
-    font-weight: 500;
-  }
-
-  .kinds {
-    margin-left: var(--s-2);
-  }
-
-  .spacer {
-    flex: 1;
-  }
-
-  .toggle {
-    padding: 4px 10px;
-    border-radius: var(--r-full);
-    font-size: var(--fs-sm);
-    color: var(--text-2);
-    border: 1px solid var(--border-strong);
-  }
-
-  .toggle.active {
-    background: var(--accent-soft);
-    color: var(--accent-text);
-    border-color: transparent;
-  }
-
-  .counts {
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-  }
-
-  .badge {
-    display: inline-block;
-    min-width: 16px;
-    margin-left: 5px;
-    padding: 0 4px;
-    border-radius: var(--r-full);
-    background: var(--accent-soft);
-    color: var(--accent-text);
-    font-size: var(--fs-xs);
-    line-height: 16px;
-  }
-
-  .icon {
-    width: 28px;
-    height: 28px;
-    border-radius: var(--r-sm);
-    color: var(--text-2);
-    font-size: var(--fs-md);
-  }
-
-  .icon:hover {
-    background: var(--bg-hover);
-  }
-</style>
+  </div>
+  <div class="topbar-right">
+    {#if ui.view === 'entries'}
+      <div class="topbar-toolbar-section">
+        <div class="kind-group">
+          <button class="kind-tab" class:active={layout.entriesMode === 'compact'} onclick={() => void setEntriesMode('compact')}>
+            Compact
+          </button>
+          <button class="kind-tab" class:active={layout.entriesMode === 'detailed'} onclick={() => void setEntriesMode('detailed')}>
+            Detailed
+          </button>
+        </div>
+        <div class="kind-group" class:seg-disabled={layout.entriesMode === 'compact'}>
+          <button
+            class="kind-tab"
+            class:active={filterState.paramDisplay === 'selected'}
+            title="Only parameter rows matching the active filters"
+            onclick={() => void setParamDisplay('selected')}
+          >
+            Selected params
+          </button>
+          <button class="kind-tab" class:active={filterState.paramDisplay === 'all'} onclick={() => void setParamDisplay('all')}>
+            All params
+          </button>
+        </div>
+        <div class="kind-group">
+          <button class="kind-tab" class:active={filterState.hideStale} onclick={() => void toggleHideStale()}>Hide stale</button>
+        </div>
+        <div class="kind-group">
+          <button class="kind-tab" class:active={selection.selectMode} title="Toggle entry selection for export" onclick={toggleSelectMode}>
+            Select
+          </button>
+        </div>
+      </div>
+    {:else if ui.view === 'code'}
+      <div class="topbar-toolbar-section">
+        <div class="kind-group">
+          <button class="kind-tab" class:active={codeUi.hideEmpty} onclick={() => setHideEmpty(!codeUi.hideEmpty)}>Hide empty</button>
+        </div>
+      </div>
+    {/if}
+    <button class="ghost-btn topbar-icon-btn btn-diag" title="Diagnostics" onclick={() => openModal('Registry diagnostics', { kind: 'diagnostics' }, 'sm')}>
+      ⓘ
+    </button>
+    <Menu />
+  </div>
+</nav>

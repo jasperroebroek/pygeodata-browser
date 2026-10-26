@@ -24,6 +24,7 @@ from pygeodata_browser.payloads import (
     _entry_matches_spec_filters,
     _sidebar_counts,
     build_browser_payload,
+    build_entries_page_payload,
     version_groups_payload,
 )
 from pygeodata_browser.state import AppState
@@ -52,7 +53,6 @@ def make_row(key='year', value='2020', group='', path='year'):
         final_key=key,
         value_text=value,
         value_type='int',
-        search_blob=f'{group} {key} {value}'.lower(),
         depth=0,
     )
 
@@ -678,7 +678,7 @@ def test_build_detail_payload_co_outputs_key_matches_frontend():
 
 
 def test_build_detail_payload_linked_entries():
-    le = LinkedEntry(param_name='base', class_name='BaseLoader', state_hash='x', params_summary={'year': '2020'})
+    le = LinkedEntry(param_name='base', class_name='BaseLoader', state_hash='x')
     entry = make_entry(record_id='rec1', class_name='MyLoader', linked_entries=[le])
     cls = make_class_info('MyLoader')
     state = make_state(entries={'rec1': entry}, classes={'MyLoader': cls})
@@ -882,3 +882,50 @@ def test_version_groups_v1_has_entries_when_entry_points_there(tmp_path: Path) -
     v1_groups = [g for g in payload if 'v1' in g['label']]
     assert v1_groups, 'expected v1 group'
     assert v1_groups[0]['has_entries'] is True
+
+
+# ---------------------------------------------------------------------------
+# build_entries_page_payload — param-row page cap
+# ---------------------------------------------------------------------------
+
+
+def _wide_state(n_entries: int = 5, rows_per_entry: int = 4) -> AppState:
+    rows = [make_row(key=f'k{i}', path=f'k{i}') for i in range(rows_per_entry)]
+    entries = {f'rec{i}': make_entry(record_id=f'rec{i}', rows=rows) for i in range(n_entries)}
+    return make_state(
+        entries=entries,
+        classes={'MyLoader': make_class_info('MyLoader')},
+        groups={'MyLoader': list(entries)},
+    )
+
+
+def _page_ids(payload: dict) -> list[str]:
+    return [r['record_id'] for r in payload['table_rows'] if r['row_type'] == 'header']
+
+
+def test_entries_page_max_rows_caps_page_by_param_rows() -> None:
+    payload = build_entries_page_payload(
+        _wide_state(),
+        selected_classes=['MyLoader'],
+        row_display='all',
+        limit=50,
+        max_rows=10,
+    )
+    assert _page_ids(payload) == ['rec0', 'rec1']
+    assert payload['total'] == 5
+
+
+def test_entries_page_max_rows_always_returns_one_entry() -> None:
+    payload = build_entries_page_payload(
+        _wide_state(),
+        selected_classes=['MyLoader'],
+        row_display='all',
+        offset=3,
+        max_rows=1,
+    )
+    assert _page_ids(payload) == ['rec3']
+
+
+def test_entries_page_max_rows_ignored_without_param_rows() -> None:
+    payload = build_entries_page_payload(_wide_state(), selected_classes=['MyLoader'], row_display='none', max_rows=1)
+    assert len(_page_ids(payload)) == 5

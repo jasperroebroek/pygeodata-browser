@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from pygeodata.catalog.filters import Filter, entry_matches_filters, matching_rows, parse_filters
-from pygeodata.catalog.types import ClassInfo, EntryInfo, FileRef, LinkedEntry
+from pygeodata.catalog.types import ClassInfo, EntryInfo, FileRef, LinkedEntry, ParamRowType
 from pygeodata.formatting.json import format_json
 from pygeodata.registries.registry import SourceRegistry
 from pygeodata.registries.versioning import VersionRegistry
@@ -33,12 +33,37 @@ def _file_payload(file_ref: FileRef) -> dict:
     }
 
 
-def _linked_entry_payload(le: LinkedEntry) -> dict:
+def _linked_entry_payload(le: LinkedEntry, entry: EntryInfo) -> dict:
+    """The linked entry's params are flattened into the parent's rows under the
+    link's own scope — derive the summary from those, nothing is stored.
+
+    A link's scope is the child scope of its ref row: top-level links use
+    ``param_name``, nested ones (e.g. ``features[3]`` inside ``feature_specs``)
+    use ``feature_specs › features[3]``. Direct children of that scope are the
+    linked loader's own params — ``feature_cls`` naming the actual feature.
+    """
+    scope = None
+    if le.param_name:
+        for row in entry.rows:
+            if row.final_key == le.param_name and row.row_type in (ParamRowType.DATA_REF, ParamRowType.CLASS_REF):
+                scope = f'{row.key_group} › {row.final_key}' if row.key_group else row.final_key
+                break
+    summary: dict[str, str] = {}
+    indexed: dict[str, str] = {}
+    if scope:
+        for row in entry.rows:
+            if row.key_group == scope:
+                target = indexed if row.final_key[-1] == ']' else summary
+                if row.final_key not in target:
+                    target[row.final_key] = row.value_text
+    if len(indexed) > 12:
+        indexed = dict(list(indexed.items())[:12])
+    summary.update(indexed)
     return {
         'param_name': le.param_name,
         'class_name': le.class_name,
         'state_hash': le.state_hash,
-        'params_summary': le.params_summary,
+        'params_summary': {k: v[:80] for k, v in summary.items()},
     }
 
 
@@ -238,7 +263,8 @@ def _build_class_cards(
                 continue
             for rec in state.entries.records_for_class(class_name):
                 if rec.dependency_tree_hash in snapshot_dep_hashes and state.entries.dep_hash_stale(
-                    class_name, rec.dependency_tree_hash
+                    class_name,
+                    rec.dependency_tree_hash,
                 ):
                     snapshot_stale_classes.add(class_name)
                     break
@@ -402,7 +428,7 @@ def _entry_detail_payload(entry: EntryInfo, same_instance_runs: list[EntryInfo] 
         'same_instance_runs': [_same_instance_run_payload(s) for s in (same_instance_runs or [])],
         'rows': [_row_payload(r) for r in entry.rows],
         'params_tree': format_json(_params_tree(entry)),
-        'linked_entries': [_linked_entry_payload(le) for le in entry.linked_entries],
+        'linked_entries': [_linked_entry_payload(le, entry) for le in entry.linked_entries],
     }
 
 
@@ -532,8 +558,10 @@ def _build_detail_payload(
             if ids_by_params is not None:
                 dep_ids = sorted(
                     ids_by_params(
-                        selected_entry_info.class_name, selected_entry_info.params_hash, selected_entry_info.spec_hash
-                    )
+                        selected_entry_info.class_name,
+                        selected_entry_info.params_hash,
+                        selected_entry_info.spec_hash,
+                    ),
                 )
                 dep_version_entries = [state.entries.get(rid) for rid in dep_ids if rid in state.entries]
             else:
@@ -691,3 +719,171 @@ def build_browser_payload(
         },
         'visible_entry_ids': visible_entry_ids,
     }
+
+
+# ---------------------------------------------------------------------------
+# Split endpoints — the Svelte client fetches classes, entry pages, and one
+# entry's detail separately so a click never re-downloads the whole table.
+# ---------------------------------------------------------------------------
+
+
+def build_classes_payload(
+    state: AppState,
+    *,
+    kind_filter: str = 'all',
+    spec_filters: dict | None = None,
+    filters: list[dict] | None = None,
+    logic_mode: str = 'AND',
+    hide_stale: bool = False,
+    version_filter: str | None = None,
+) -> dict:
+    vreg = state.version_registry
+    parsed_filters = parse_filters(filters or [])
+    spec_filters = spec_filters or {}
+    version_obj = vreg.version_by_id(version_filter) if version_filter else None
+    dep_hash_set = vreg.dep_hashes_for_version(version_obj) if version_obj is not None else None
+
+    sidebar_counts = _sidebar_counts(
+        state,
+        kind_filter=kind_filter,
+        spec_filters=spec_filters,
+        filters=parsed_filters,
+        logic_mode=logic_mode,
+        hide_stale=hide_stale,
+        snapshot_filter=dep_hash_set,
+    )
+
+    if hide_stale:
+        if hasattr(state.entries, 'records_for_class'):
+            stale_hidden = 0
+            for class_name in state.entry_registry.class_names:
+                for rec in state.entries.records_for_class(class_name):
+                    if rec.dependency_tree_hash and state.entries.dep_hash_stale(class_name, rec.dependency_tree_hash):
+                        stale_hidden += 1
+        else:
+            stale_hidden = sum(1 for e in state.entries.values() if e.dep_hash_stale)
+    else:
+        stale_hidden = 0
+
+    return {
+        'class_cards': _build_class_cards(
+            state,
+            sidebar_counts=sidebar_counts,
+            selected_classes=[],
+            snapshot_dep_hashes=dep_hash_set,
+        ),
+        'spec_options': state.spec_options,
+        'version_options': version_groups_payload(vreg),
+        'diagnostics': {**state.diagnostics, 'stale_hidden': stale_hidden},
+        'counts': {
+            'classes': len(state.classes),
+            'classes_loaded': sum(1 for c in state.classes.values() if c.loaded),
+            'entries': len(state.entries),
+            'visible_classes': len(sidebar_counts),
+            'visible_entries': sum(sidebar_counts.values()),
+        },
+    }
+
+
+def build_entries_page_payload(
+    state: AppState,
+    *,
+    selected_classes: list[str],
+    kind_filter: str = 'all',
+    spec_filters: dict | None = None,
+    filters: list[dict] | None = None,
+    logic_mode: str = 'AND',
+    hide_stale: bool = False,
+    version_filter: str | None = None,
+    offset: int = 0,
+    limit: int = 50,
+    row_display: str = 'none',
+    selected_entry: str | None = None,
+    ids_only: bool = False,
+    max_rows: int | None = None,
+) -> dict:
+    """One page of visible header rows across the selected classes.
+
+    Filtering always sees the full class; only the payload is paginated, so
+    ``total`` is exact for the current filter state. ``max_rows`` additionally
+    caps a page by param rows (at least one entry), so pages of wide classes
+    stay cheap to transfer and lay out; clients page on by the headers received. With ``ids_only`` (and
+    ``selected_classes`` empty = all classes) it returns the visible record ids
+    — the export view's fallback set — without building any table rows.
+    """
+    vreg = state.version_registry
+    parsed_filters = parse_filters(filters or [])
+    spec_filters = spec_filters or {}
+    version_obj = vreg.version_by_id(version_filter) if version_filter else None
+    dep_hash_set = vreg.dep_hashes_for_version(version_obj) if version_obj is not None else None
+
+    if ids_only:
+        fast_ids = getattr(state.entries, 'visible_ids', None)
+        if fast_ids is not None and not parsed_filters and not spec_filters:
+            ids = fast_ids(
+                selected_classes=selected_classes,
+                kind_filter=kind_filter,
+                snapshot_dep_hashes=dep_hash_set,
+                hide_stale=hide_stale,
+                object_type_by_class={name: ci.object_type for name, ci in state.classes.items()},
+            )
+            if ids is not None:
+                return {'ids': ids, 'total': len(ids)}
+
+    visible_groups = _build_visible_groups(
+        state,
+        selected_classes=selected_classes,
+        kind_filter=kind_filter,
+        spec_filters=spec_filters,
+        filters=parsed_filters,
+        logic_mode=logic_mode,
+        hide_stale=hide_stale,
+        snapshot_filter=dep_hash_set,
+    )
+    entries = [(class_name, e) for class_name, group in visible_groups for e in group]
+    total = len(entries)
+    if ids_only:
+        return {'ids': [e.record_id for _, e in entries], 'total': total}
+    offset = max(offset, 0)
+    limit = max(min(limit, 500), 1)
+    page = entries[offset : offset + limit]
+    if max_rows and row_display != 'none':
+        budget = max_rows
+        for n, (_, e) in enumerate(page):
+            budget -= len(e.rows)
+            if budget < 0:
+                page = page[: max(n, 1)]
+                break
+
+    page_groups: list[tuple[str, list[EntryInfo]]] = []
+    for class_name, e in page:
+        if page_groups and page_groups[-1][0] == class_name:
+            page_groups[-1][1].append(e)
+        else:
+            page_groups.append((class_name, [e]))
+
+    return {
+        'table_rows': _build_table_rows(
+            visible_groups=page_groups,
+            classes=state.classes,
+            selected_entry=selected_entry,
+            filters=parsed_filters,
+            logic_mode=logic_mode,
+            row_display=row_display,
+        ),
+        'total': total,
+        'offset': offset,
+        'limit': limit,
+    }
+
+
+def build_entry_detail_payload(state: AppState, *, record_id: str) -> dict | None:
+    entry = state.entries.get(record_id)
+    if entry is None:
+        return None
+    return _build_detail_payload(
+        state=state,
+        selected_entry_info=entry,
+        selected_classes=[entry.class_name],
+        vreg=state.version_registry,
+    )

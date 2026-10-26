@@ -1,0 +1,195 @@
+/* ============================================================
+   variables.css — design tokens (light + dark), reset, base styles
+   ============================================================ */
+
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  /* Backgrounds */
+  --bg:         #fff;
+  --surface:    #fff;
+  --s2:         #f8f7f4;
+  --s3:         #edecea;
+
+  /* Borders */
+  --border:     #dbd8d1;
+  --border-s:   #e8e6e1;
+
+  /* Text */
+  --text:       #1e1f1b;
+  --muted:      #676960;
+  --faint:      #9a9c94;
+
+  /* Accent (teal) */
+  --accent:     #0b6668;
+  --accent-bg:  #d6e9e9;
+  --accent-bg2: #ecf5f5;
+  --accent-mid: #bad4d4;
+  --on-accent:  #fff;
+
+  /* Semantic colours */
+  --warn:          #8f5f20;
+  --warn-bg:       #f3e8d2;
+  --warn-border:   #e0c48a;
+  --danger:        #8c3824;
+  --danger-bg:     #f2ddd6;
+  --danger-border: #d9a898;
+  --danger-strong:    #c0392b;
+  --danger-strong-bg: #fdecea;
+  --deps:          #4a7a9b;
+  --deps-bg:       #e8f0f5;
+  --deps-border:   #a0bdd0;
+  --deps-dot:      #7a9ab5;
+
+  /* Object-type badges */
+  --type-data:          #3f5876;
+  --type-data-bg:       #e8eef6;
+  --type-data-border:   #a8bad3;
+  --type-table:         #46683f;
+  --type-table-bg:      #eaf2e8;
+  --type-table-border:  #a9c2a3;
+  --type-figure:        #6d4a6c;
+  --type-figure-bg:     #f2eaf2;
+  --type-figure-border: #c0a5bf;
+
+  /* Diffs */
+  --diff-add-bg:     #e6ffed;
+  --diff-del-bg:     #ffeef0;
+  --diff-add-sign:   #28a745;
+  --diff-del-sign:   #d73a49;
+  --diff-hunk-bg:    #dbedff;
+  --diff-hunk-fg:    #0550ae;
+  --diff-word-add:   #acf2bd;
+  --diff-word-del:   #fdb8c0;
+  --diff-changed-bg: #fff3cd;
+
+  /* Overlays */
+  --backdrop:          rgba(0, 0, 0, .28);
+  --overlay-bg:        rgba(240, 239, 235, .88);
+  --shadow-color:      rgba(0, 0, 0, .10);
+  --shadow-color-soft: rgba(0, 0, 0, .04);
+  --modal-bar-bg:      #fafaf8;
+  --term-bg:           #f2f2f2;
+  --toast-bg:          #1c1e1a;
+  --toast-fg:          #fff;
+  --figure-bg:         #fff;
+
+  /* Layout */
+  --topbar-h:       42px;
+  --sidebar-w:      400px;
+  --detail-w:       700px;
+  --compact-pane-w: 320px;
+
+  --mono: ui-monospace, Menlo, monospace;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg:         #1b1c1a;
+  --surface:    #1b1c1a;
+  --s2:         #232421;
+  --s3:         #2e2f2b;
+
+  --border:     #3b3c37;
+  --border-s:   #2f302c;
+
+  --text:       #e6e6e1;
+  --muted:      #a6a89f;
+  --faint:      #75776f;
+
+  --accent:     #5cb8b9;
+  --accent-bg:  #1f3a3b;
+  --accent-bg2: #192b2c;
+  --accent-mid: #2d5556;
+  --on-accent:  #10201f;
+
+  --warn:          #d8a65c;
+  --warn-bg:       #3a2f1d;
+  --warn-border:   #6b5328;
+  --danger:        #e08b74;
+  --danger-bg:     #3d2620;
+  --danger-border: #7a4032;
+  --danger-strong:    #ef7b6c;
+  --danger-strong-bg: #3d2420;
+  --deps:          #8db5d2;
+  --deps-bg:       #1f2d38;
+  --deps-border:   #3d5a70;
+  --deps-dot:      #7a9ab5;
+
+  --type-data:          #a9bfdd;
+  --type-data-bg:       #222c3a;
+  --type-data-border:   #3e5170;
+  --type-table:         #a8c99f;
+  --type-table-bg:      #22301f;
+  --type-table-border:  #44603c;
+  --type-figure:        #d2b0d1;
+  --type-figure-bg:     #33263a;
+  --type-figure-border: #634a62;
+
+  --diff-add-bg:     #1c3324;
+  --diff-del-bg:     #3a2025;
+  --diff-add-sign:   #5fd07c;
+  --diff-del-sign:   #f07a85;
+  --diff-hunk-bg:    #1d2e45;
+  --diff-hunk-fg:    #8cb8ff;
+  --diff-word-add:   #2b5c39;
+  --diff-word-del:   #6b2f37;
+  --diff-changed-bg: #3a3320;
+
+  --backdrop:          rgba(0, 0, 0, .55);
+  --overlay-bg:        rgba(20, 21, 19, .88);
+  --shadow-color:      rgba(0, 0, 0, .45);
+  --shadow-color-soft: rgba(0, 0, 0, .25);
+  --modal-bar-bg:      #232421;
+  --term-bg:           #141513;
+  --toast-bg:          #e6e6e1;
+  --toast-fg:          #1b1c1a;
+  --figure-bg:         #fff;
+}
+
+
+/* ------------------------------------------------------------
+   Reset & base
+   ------------------------------------------------------------ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font: 13px/1.5 Inter, system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.hidden {
+  display: none !important;
+}

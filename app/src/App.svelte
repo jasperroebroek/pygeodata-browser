@@ -1,164 +1,160 @@
 <script lang="ts">
-  import { app, init, pollStatus } from './lib/stores.svelte';
+  import {
+    init,
+    layout,
+    navigateBack,
+    navigateForward,
+    selectAdjacentEntry,
+    selection,
+    setDetailWidth,
+    ui,
+  } from './lib/stores.svelte';
+  import { toasts } from './lib/toast.svelte';
   import TopBar from './components/TopBar.svelte';
-  import ClassColumn from './components/ClassColumn.svelte';
-  import TableColumn from './components/TableColumn.svelte';
-  import DetailColumn from './components/DetailColumn.svelte';
+  import Sidebar from './components/Sidebar.svelte';
+  import MainPane from './components/MainPane.svelte';
+  import DetailPane from './components/DetailPane.svelte';
+  import Modal from './components/Modal.svelte';
   import CodeView from './views/CodeView.svelte';
   import ExportView from './views/ExportView.svelte';
 
   init();
+
+  const progressPct = $derived.by(() => {
+    const p = ui.progress;
+    const total = (p.reimport_total ?? 0) + (p.total ?? 0);
+    return total ? Math.round((((p.reimport_done ?? 0) + (p.done ?? 0)) / total) * 100) : 0;
+  });
+
+  const overlayText = $derived.by(() => {
+    const p = ui.progress;
+    const rTotal = p.reimport_total ?? 0;
+    const rDone = p.reimport_done ?? 0;
+    if (rTotal > 0 && rDone < rTotal) {
+      return { label: 'Reimporting…', sub: `${rDone} / ${rTotal} files`, pct: Math.round((rDone / rTotal) * 100) };
+    }
+    if (p.total) {
+      return { label: 'Loading entries…', sub: `${p.done ?? 0} / ${p.total}`, pct: Math.round(((p.done ?? 0) / p.total) * 100) };
+    }
+    if (rTotal > 0) return { label: 'Reimporting…', sub: 'Done — scanning entries…', pct: 100 };
+    return { label: ui.reimporting ? 'Reimporting…' : 'Loading entries…', sub: '', pct: 0 };
+  });
+
+  // Select mode is always on in the export view (its +/− icons remove entries).
+  $effect(() => {
+    document.body.classList.toggle('select-mode', selection.selectMode || ui.view === 'export');
+  });
+
+  function onKeydown(e: KeyboardEvent) {
+    const target = e.target as HTMLElement;
+    if (e.metaKey && e.key === '[') {
+      e.preventDefault();
+      void navigateBack();
+      return;
+    }
+    if (e.metaKey && e.key === ']') {
+      e.preventDefault();
+      void navigateForward();
+      return;
+    }
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return;
+    if (ui.view !== 'entries' || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
+    e.preventDefault();
+    void selectAdjacentEntry(e.key === 'ArrowDown' ? 1 : -1);
+  }
+
+  // ------------------------------------------------------------------ detail pane resize
+
+  let detailEl: HTMLElement | undefined = $state();
+  let dragging = $state(false);
+  let startX = 0;
+  let startW = 0;
+  let dragW = $state<number | null>(null);
+
+  function startResize(e: MouseEvent) {
+    if (!detailEl) return;
+    e.preventDefault();
+    startX = e.clientX;
+    startW = detailEl.getBoundingClientRect().width;
+    dragging = true;
+  }
+
+  function onMouseMove(e: MouseEvent) {
+    if (!dragging) return;
+    // Drag left = wider.
+    dragW = Math.max(200, Math.min(window.innerWidth * 0.8, startW + startX - e.clientX));
+  }
+
+  function onMouseUp() {
+    if (!dragging) return;
+    dragging = false;
+    if (dragW !== null) setDetailWidth(dragW);
+    dragW = null;
+  }
+
+  const detailWidth = $derived(dragW ?? layout.detailWidth);
+
+  $effect(() => {
+    document.body.style.cursor = dragging ? 'col-resize' : '';
+    document.body.style.userSelect = dragging ? 'none' : '';
+  });
 </script>
 
-<div class="shell">
-  <TopBar />
-  {#if app.loading || app.reconciling}
-    <div class="progress-row" data-loading>
-      {#if app.bootstrap.length > 0}
-        {@const done = (app.progress.done ?? 0) / Math.max(app.progress.total ?? 0, 1)}
-        <div class="progress-bar">
-          <div class="progress-fill" style={app.progress.total ? `width: ${(done * 100).toFixed(1)}%` : ''} data-has-total={!!app.progress.total}></div>
-        </div>
-        <span class="progress-label">
-          {#if app.reconciling && !app.loading}
-            Reconciling…
-          {:else if app.progress.total}
-            {app.progress.done ?? 0}/{app.progress.total} entries
-          {:else}
-            Building full state…
-          {/if}
-        </span>
-      {:else}
-        <div class="boot-screen">
-          <div class="boot-title">Registry</div>
-          <div class="progress-bar"><div class="progress-fill" data-indeterminate></div></div>
-          {#if app.loadError}
-            <pre class="boot-error">{app.loadError}</pre>
-          {:else}
-            <div class="progress-label">Loading cache state…</div>
-          {/if}
-        </div>
-      {/if}
+<svelte:window onkeydown={onKeydown} onmousemove={onMouseMove} onmouseup={onMouseUp} />
+
+<TopBar />
+
+{#if ui.view === 'entries'}
+  <div class="view-entries">
+    <div
+      class="app-layout"
+      class:mode-compact={layout.entriesMode === 'compact'}
+      class:mode-detailed={layout.entriesMode === 'detailed'}
+    >
+      <Sidebar />
+      <MainPane />
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions (mouse-only drag handle) -->
+      <div
+        class="resize-handle"
+        class:dragging
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize detail pane"
+        onmousedown={startResize}
+      ></div>
+      <aside class="detail-pane" bind:this={detailEl} style:flex={detailWidth ? `0 0 ${detailWidth}px` : null}>
+        <DetailPane />
+      </aside>
     </div>
-  {/if}
-  {#if app.view === 'entries'}
-    <main class="columns" class:ready={!app.loading}>
-      <ClassColumn />
-      <TableColumn />
-      <DetailColumn />
-    </main>
-  {:else if app.view === 'code'}
-    <main class="full"><CodeView /></main>
-  {:else}
-    <main class="full"><ExportView /></main>
-  {/if}
+  </div>
+{:else if ui.view === 'code'}
+  <CodeView />
+{:else}
+  <ExportView />
+{/if}
+
+<Modal />
+
+{#if (ui.loading && ui.statusKnown && !ui.overlay) || ui.reconciling}
+  <div class="fast-progress" title={ui.reimporting ? 'Reimporting Python files…' : 'Loading entries…'}>
+    <div class="loading-bar-track fast-progress-track">
+      <div class="loading-bar-fill" style:width="{ui.reconciling && !ui.loading ? 100 : progressPct}%"></div>
+    </div>
+  </div>
+{/if}
+
+{#if ui.loading && ui.overlay}
+  <div class="loading-overlay">
+    <div class="loading-box">
+      <div class="loading-label">{overlayText.label}</div>
+      <div class="loading-bar-track"><div class="loading-bar-fill" style:width="{overlayText.pct}%"></div></div>
+      <div class="loading-sub">{ui.loadError ?? overlayText.sub}</div>
+    </div>
+  </div>
+{/if}
+
+<div class="toast-stack">
+  {#each toasts as t (t.id)}
+    <div class="toast-item" class:on={t.on}>{t.message}</div>
+  {/each}
 </div>
-
-<style>
-  .shell {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-  }
-
-  .columns {
-    display: grid;
-    grid-template-columns: 300px minmax(0, 1fr) minmax(0, 1.2fr);
-    flex: 1;
-    min-height: 0;
-  }
-
-  .columns.ready > :global(*) {
-    opacity: 1;
-  }
-
-  .columns > :global(*) {
-    opacity: 0.45;
-    transition: opacity var(--t-med) var(--ease);
-  }
-
-  .progress-row {
-    height: 3px;
-    background: var(--bg-panel);
-  }
-
-  .progress-bar {
-    height: 100%;
-    width: 100%;
-    overflow: hidden;
-  }
-
-  .progress-fill {
-    height: 100%;
-    width: 34%;
-    background: var(--accent);
-    border-radius: var(--r-full);
-  }
-
-  .progress-fill:not([data-has-total='true']) {
-    animation: slide 1.1s var(--ease) infinite;
-  }
-
-  @keyframes slide {
-    from {
-      transform: translateX(-110%);
-    }
-    to {
-      transform: translateX(410%);
-    }
-  }
-
-  .progress-label {
-    position: absolute;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-    margin-top: var(--s-2);
-  }
-
-  .progress-row {
-    position: relative;
-  }
-
-  .boot-screen {
-    position: fixed;
-    inset: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: var(--s-3);
-    background: var(--bg);
-    z-index: 10;
-  }
-
-  .boot-title {
-    font-size: 1.3rem;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-  }
-
-  .boot-screen .progress-bar {
-    height: 3px;
-    width: 180px;
-  }
-
-  .boot-error {
-    max-width: 70ch;
-    max-height: 40vh;
-    overflow: auto;
-    font-family: var(--font-mono);
-    font-size: var(--fs-xs);
-    color: var(--danger);
-    background: var(--code-bg);
-    padding: var(--s-3);
-    border-radius: var(--r-md);
-  }
-
-  .full {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-  }
-</style>

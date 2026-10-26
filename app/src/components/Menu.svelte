@@ -1,149 +1,67 @@
 <script lang="ts">
   import { api } from '../lib/api';
-  import { app, pollStatus } from '../lib/stores.svelte';
-  import { toast } from './detail/toast.svelte';
-  import CleanModal from './menu/CleanModal.svelte';
+  import { setTheme, startReload, ui } from '../lib/stores.svelte';
+  import type { Theme } from '../lib/stores.svelte';
+  import { openModal } from '../lib/modal.svelte';
 
   let open = $state(false);
-  let wrapEl: HTMLElement | null = $state(null);
-  // Live-classes flag mirrors legacy hasLiveClasses (fetched from /api/status).
-  let hasLive = $state(false);
-  let cleanModal = $state<null | 'cache' | 'source'>(null);
+  let wrapEl: HTMLElement | undefined = $state();
 
-  const noPayload = $derived(app.payload === null);
+  const THEMES: Theme[] = ['light', 'dark', 'system'];
+  const THEME_LABEL: Record<Theme, string> = { light: 'Light', dark: 'Dark', system: 'System' };
 
-  async function toggleMenu(): Promise<void> {
+  async function toggle() {
     open = !open;
     if (open) {
       try {
-        hasLive = (await api.status()).has_live_classes;
+        ui.hasLiveClasses = (await api.status()).has_live_classes;
       } catch {
         /* keep last known value */
       }
     }
   }
 
-  function onWindowClick(e: MouseEvent): void {
+  function onWindowClick(e: MouseEvent) {
     if (open && wrapEl && !wrapEl.contains(e.target as Node)) open = false;
   }
 
-  function onKeydown(e: KeyboardEvent): void {
-    if (e.key === 'Escape' && open) open = false;
+  function run(action: () => void) {
+    open = false;
+    action();
   }
 
-  async function reload(reimport: boolean): Promise<void> {
-    open = false;
-    try {
-      await api.rebuild(reimport);
-      app.loading = true;
-      app.ready = false;
-      pollStatus();
-    } catch (err) {
-      toast(`${reimport ? 'Reimport' : 'Reload'} failed: ${err}`);
-    }
-  }
-
-  function openClean(kind: 'cache' | 'source'): void {
-    open = false;
-    cleanModal = kind;
+  function cycleTheme() {
+    setTheme(THEMES[(THEMES.indexOf(ui.theme) + 1) % THEMES.length]);
   }
 </script>
 
-<svelte:window onclick={onWindowClick} onkeydown={onKeydown} />
+<svelte:window onclick={onWindowClick} onkeydown={(e) => e.key === 'Escape' && (open = false)} />
 
-<div class="wrap" bind:this={wrapEl}>
-  <button class="icon" title="Menu" aria-haspopup="menu" aria-expanded={open} onclick={toggleMenu}>
-    ⋮
-  </button>
-
+<div class="topbar-menu-wrap" bind:this={wrapEl}>
+  <button class="ghost-btn topbar-icon-btn" title="Menu" aria-haspopup="menu" aria-expanded={open} onclick={toggle}>⋮</button>
   {#if open}
-    <div class="menu" role="menu">
-      <button class="item" role="menuitem" disabled={noPayload} onclick={() => void reload(false)}>
-        Reload from disk
-      </button>
-      <button class="item" role="menuitem" disabled={noPayload} onclick={() => void reload(true)}>
-        Reimport Python files
-      </button>
-      <div class="sep"></div>
+    <div class="topbar-menu" role="menu">
+      <button class="topbar-menu-item" role="menuitem" onclick={() => run(() => void startReload(false))}>Reload from disk</button>
+      <button class="topbar-menu-item" role="menuitem" onclick={() => run(() => void startReload(true))}>Reimport Python files</button>
+      <div class="topbar-menu-sep"></div>
       <button
-        class="item"
+        class="topbar-menu-item"
         role="menuitem"
-        disabled={noPayload || !hasLive}
-        onclick={() => openClean('cache')}
+        disabled={!ui.hasLiveClasses}
+        onclick={() => run(() => openModal('Clean Cache', { kind: 'clean', target: 'cache' }, 'md'))}
       >
         Clean cache…
       </button>
       <button
-        class="item"
+        class="topbar-menu-item"
         role="menuitem"
-        disabled={noPayload || !hasLive}
-        onclick={() => openClean('source')}
+        disabled={!ui.hasLiveClasses}
+        onclick={() => run(() => openModal('Clean Source Registry', { kind: 'clean', target: 'source' }, 'md'))}
       >
         Clean registry…
       </button>
+      <div class="topbar-menu-sep"></div>
+      <button class="topbar-menu-item" role="menuitem" onclick={cycleTheme}>Theme: {THEME_LABEL[ui.theme]}</button>
     </div>
   {/if}
 </div>
-
-{#if cleanModal}
-  <CleanModal kind={cleanModal} onClose={() => (cleanModal = null)} />
-{/if}
-
-<style>
-  .wrap {
-    position: relative;
-    display: flex;
-  }
-
-  .icon {
-    width: 28px;
-    height: 28px;
-    border-radius: var(--r-sm);
-    color: var(--text-2);
-    font-size: var(--fs-md);
-    line-height: 1;
-  }
-
-  .icon:hover {
-    background: var(--bg-hover);
-  }
-
-  .menu {
-    position: absolute;
-    top: calc(100% + 4px);
-    right: 0;
-    z-index: 60;
-    min-width: 180px;
-    padding: var(--s-1);
-    background: var(--bg-elev);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--r-md);
-    box-shadow: var(--shadow-md);
-    display: flex;
-    flex-direction: column;
-  }
-
-  .item {
-    padding: var(--s-1) var(--s-2);
-    border-radius: var(--r-sm);
-    text-align: left;
-    font-size: var(--fs-sm);
-    color: var(--text);
-    white-space: nowrap;
-  }
-
-  .item:hover:not(:disabled) {
-    background: var(--bg-hover);
-  }
-
-  .item:disabled {
-    color: var(--text-3);
-    cursor: default;
-  }
-
-  .sep {
-    height: 1px;
-    margin: var(--s-1) 0;
-    background: var(--border);
-  }
-</style>
