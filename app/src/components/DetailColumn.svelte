@@ -2,6 +2,7 @@
   import { api } from '../lib/api';
   import type { DetailPayload, EntryDetail, SpecPayload } from '../lib/api';
   import { app, selectClasses, selectEntry } from '../lib/stores.svelte';
+  import { showWhatChanged } from '../lib/nav.svelte';
   import './detail.css';
   import ClassHeader from './detail/ClassHeader.svelte';
   import CoOutputs from './detail/CoOutputs.svelte';
@@ -224,6 +225,15 @@
             <span class="dbadge dbadge--neutral" title="Code version this entry was computed with">
               {detail.entry_version_label}
             </span>
+            {#if e.record_id}
+              <button
+                class="act-btn"
+                title="Show what changed in the code since this entry was computed"
+                onclick={() => showWhatChanged(e.record_id)}
+              >
+                What changed
+              </button>
+            {/if}
           {/if}
         </div>
         <div class="dcard-hd-actions">

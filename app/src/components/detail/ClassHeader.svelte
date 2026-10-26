@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { DetailPayload } from '../../lib/api';
+  import { navigateToCodeClass } from '../../lib/nav.svelte';
   import { selectClasses } from '../../lib/stores.svelte';
   import { formatMtime } from './apiDetail';
 
@@ -22,6 +23,16 @@
   function jump(cls: string): void {
     selectClasses([cls]);
   }
+
+  // code_versions is oldest-first; pin the newest snapshot of the class.
+  function newestSourceHash(): string | undefined {
+    const versions = detail.code_versions;
+    return versions.length ? versions[versions.length - 1].source_hash : undefined;
+  }
+
+  function openCodeView(): void {
+    navigateToCodeClass(detail.class_name, newestSourceHash());
+  }
 </script>
 
 <div class="dcard">
@@ -29,7 +40,9 @@
     <div class="dcard-hd-top">
       <span class="dcard-hd-label">Class</span>
       <span class="dcard-hd-title">
-        {detail.class_name}
+        <button class="cls-name" title="Open in code view" onclick={openCodeView}>
+          {detail.class_name}
+        </button>
         {#if detail.object_type}
           <span class="kind-badge {kindClass[detail.object_type] ?? ''}">
             {detail.object_type}
@@ -55,8 +68,17 @@
         {/if}
       </span>
     </div>
-    {#if onClassJson || onGraph}
+    {#if detail.source_available || onClassJson || onGraph}
       <div class="dcard-hd-actions">
+        {#if detail.source_available}
+          <button
+            class="act-btn"
+            title="View source code for this class"
+            onclick={openCodeView}
+          >
+            Source
+          </button>
+        {/if}
         {#if detail.graph_available && detail.class_graph_path && onGraph}
           <button
             class="act-btn"
@@ -142,3 +164,22 @@
     {/if}
   </div>
 </div>
+
+<style>
+  .cls-name {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    font-weight: inherit;
+    color: var(--link);
+    cursor: pointer;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .cls-name:hover {
+    text-decoration: underline;
+  }
+</style>

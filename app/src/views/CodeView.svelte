@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app, selectClasses } from '../lib/stores.svelte';
+  import { takeCodeTarget, takeDiffRecordId } from '../lib/nav.svelte';
   import {
     codeApi,
     isLoading,
@@ -493,8 +494,91 @@
     { value: 'none', label: '(empty)' },
   ]);
 
+  // ---------------------------------------------------------------------------
+  // Cross-view navigation targets (detail column Source / What changed)
+  // ---------------------------------------------------------------------------
+
+  function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function awaitVersions(): Promise<void> {
+    for (let i = 0; i < 200 && versionsLoading; i++) await sleep(100);
+  }
+
+  async function selectCodeTarget(className: string, sourceHash: string | null) {
+    await awaitVersions();
+    if (!versions.length) return;
+    if (browseMode !== 'version') {
+      browseMode = 'version';
+      localStorage.setItem('code_browse_mode', 'version');
+    }
+    let versionId: string = versions[0].version_id;
+    if (sourceHash) {
+      try {
+        const res = await codeApi.sourceHashVersion(sourceHash);
+        if (res.version_id) versionId = res.version_id;
+      } catch {
+        /* fall back to newest version */
+      }
+    }
+    const mySeq = ++selectSeq;
+    selectedVersion = versionId;
+    selectedClass = null;
+    summary = null;
+    summaryError = null;
+    clearClassDiff();
+    snapshot = null;
+    const classes = await codeApi.versionClasses(versionId).catch(() => null);
+    if (mySeq !== selectSeq) return;
+    if (!classes) {
+      flashNote('Could not load version');
+      return;
+    }
+    versionClasses = classes;
+    const match =
+      (sourceHash ? classes.find((c) => c.source_hash === sourceHash) : null) ??
+      classes.find((c) => c.class_name === className);
+    if (match) await selectClass(match);
+  }
+
+  async function selectDiffRecord(recordId: string) {
+    await awaitVersions();
+    try {
+      const data = await codeApi.versionDiff({ record_id: recordId });
+      if (data.error) {
+        flashNote(data.message ?? 'Snapshot not available for this entry');
+        return;
+      }
+      const baseVersionId = data.base_version_id ?? null;
+      hasLiveStale = !!data.has_live_stale;
+      // Sidebar mirrors the diff target; middle pane shows the classes of the
+      // version the entry was computed at.
+      selectedVersion = hasLiveClasses ? 'live' : (versions[0]?.version_id ?? 'live');
+      const baseMeta = versions.find((v) => v.version_id === baseVersionId) ?? versions[0];
+      if (baseMeta) {
+        try {
+          versionClasses = await codeApi.versionClasses(baseMeta.version_id);
+        } catch {
+          /* keep current classes */
+        }
+      }
+      await showVersionDiff('live', baseVersionId);
+    } catch {
+      flashNote('Could not load diff');
+    }
+  }
+
   $effect(() => {
     void load();
+  });
+
+  $effect(() => {
+    if (app.view !== 'code') return;
+    const target = takeCodeTarget();
+    const diffId = takeDiffRecordId();
+    if (target) void selectCodeTarget(target.className, target.sourceHash ?? null);
+    else if (diffId) void selectDiffRecord(diffId);
   });
 </script>
 
