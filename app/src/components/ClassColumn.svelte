@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, selectClasses, toggleHideStale, toggleShowEmpty, clearAllFilters, setVersionFilter, setFilters } from '../lib/stores.svelte';
+  import { app, selectClasses, toggleShowEmpty, clearAllFilters, setVersionFilter, setFilters } from '../lib/stores.svelte';
   import type { ClassCard } from '../lib/api';
   import { toggleSpecFilter } from '../lib/stores.svelte';
   import FilterPanel from './FilterPanel.svelte';
@@ -75,27 +75,28 @@
 </script>
 
 <aside class="classes">
-  <div class="search">
-    <input type="search" placeholder="Filter classes…" bind:value={search} />
-  </div>
-
-  {#if activeFilters.length > 0}
-    <div class="active-filters">
+  <div class="pills-row">
+    {#if activeFilters.length > 0}
       {#each activeFilters as f (f.key)}
         <button class="active-pill" title={f.title} onclick={f.clear}>{f.label} ✕</button>
       {/each}
       <button class="clear-all" onclick={clearAllFilters}>Clear all</button>
-    </div>
-  {/if}
+    {:else}
+      <span class="no-filters">No filters active</span>
+    {/if}
+  </div>
   <FilterPanel />
 
-  <div class="toggles">
-    <button class:active={app.hideStale} onclick={toggleHideStale} title="Hide entries whose dependencies changed">
-      Hide stale
-    </button>
+
+
+  <div class="classes-hd">
+    <span class="classes-title">Classes</span>
     <button class:active={app.showEmpty} onclick={toggleShowEmpty} title="Show classes without entries">
       Show empty
     </button>
+  </div>
+  <div class="search">
+    <input type="search" placeholder="Filter classes…" bind:value={search} />
   </div>
 
   <div class="list">
@@ -109,11 +110,13 @@
         class="card"
         class:selected={card.selected}
         class:dim={card.visible_record_count === 0}
-        onclick={() =>
+        onclick={(e) =>
           selectClasses(
             card.selected
               ? app.selectedClasses.filter((c) => c !== card.class_name)
-              : [...app.selectedClasses, card.class_name],
+              : e.metaKey || e.ctrlKey
+                ? [...app.selectedClasses, card.class_name]
+                : [card.class_name],
           )}
       >
         <span class="name">{card.class_name}</span>
@@ -137,9 +140,36 @@
     min-height: 0;
   }
 
+  .classes-hd {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--s-2) var(--s-2) var(--s-1);
+  }
+
+  .classes-hd button {
+    padding: 2px 8px;
+    border-radius: var(--r-full);
+    border: 1px solid var(--border-strong);
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+  }
+
+  .classes-hd button.active {
+    background: var(--accent-soft);
+    color: var(--accent-text);
+    border-color: transparent;
+  }
+
+  .classes-title {
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
   .search {
-    padding: var(--s-2);
-    border-bottom: 1px solid var(--border);
+    padding: 0 var(--s-2) var(--s-2);
   }
 
   input {
@@ -158,13 +188,19 @@
     border-color: transparent;
   }
 
-  .active-filters {
+  .pills-row {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 4px;
-    padding: var(--s-2);
+    min-height: 26px;
+    padding: var(--s-1) var(--s-2);
     border-bottom: 1px solid var(--border);
-    background: var(--accent-softer);
+  }
+
+  .no-filters {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
   }
 
   .active-pill {

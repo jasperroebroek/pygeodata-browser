@@ -33,7 +33,7 @@ export const app = $state({
   selectedClasses: [] as string[],
   selectedEntry: null as string | null,
   kindFilter: 'all' as KindFilter,
-  rowDisplay: (window.innerWidth >= 1200 ? 'all' : 'none') as 'none' | 'all',
+  rowDisplay: 'none' as 'none' | 'all',
   classSearch: '',
 
   filters: [] as FilterRow[],

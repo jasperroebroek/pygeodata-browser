@@ -21,6 +21,13 @@ from pygeodata.spec import SpecKeys
 from pygeodata.tracked_object import TrackedObject
 from pygeodata_browser.entry_store import EntryStore, spec_options_from_catalog
 
+_active_state: 'AppState | None' = None
+
+
+def _ctx_state() -> 'AppState | None':
+    return _active_state
+
+
 _SKIP_DIRS = {'venv', 'env', '.venv', 'build', 'dist', 'site-packages', 'tests', 'test', 'cache'}
 _SKIP_PREFIXES = ('test_', 'conftest', 'setup', 'manage')
 _log = logging.getLogger(__name__)
@@ -103,19 +110,28 @@ class AppContext:
 
 
 def _prewarm_async(state: AppState) -> None:
-    """Enrich one class in the background: absorbs per-process warm-up costs
-    (engine setup, first display query) so the first user selection is fast."""
+    """Enrich every class in the background, smallest first.
+
+    The UI is usable immediately (identity hydration is instant); this absorbs
+    the per-class display-JSON cost so a click on any class — including the
+    largest — is warm after a few seconds. State reloads restart the warm pass.
+    """
 
     def _warm():
         try:
             for_class = getattr(state.entries, 'for_class', None)
             if for_class is None:
                 return
-            for class_name in state.entry_registry.class_names:
-                if state.entries.records_for_class(class_name):
-                    _log.info('prewarming %s', class_name)
-                    for_class(class_name)
-                    return
+            todo = [
+                class_name
+                for class_name in state.entry_registry.class_names
+                if state.entries.records_for_class(class_name)
+            ]
+            todo.sort(key=lambda cn: len(state.entries.records_for_class(cn)))
+            for class_name in todo:
+                if state is not _ctx_state():
+                    return  # a reload replaced this state; stop warming it
+                for_class(class_name)
         except Exception:
             _log.debug('prewarm failed', exc_info=True)
 
@@ -232,7 +248,7 @@ def build_state(progress: dict | None = None) -> AppState:
             SpecKeys.SHAPE: sorted({e.spec.shape for e in eager.values() if e.spec.shape}),
             SpecKeys.BOUNDS: [{'value': k, 'label': bounds_by_key[k]} for k in _none_first(bounds_by_key)],
         }
-    return AppState(
+    state = AppState(
         classes=classes,
         entries=entries,
         diagnostics=diagnostics,
@@ -240,3 +256,6 @@ def build_state(progress: dict | None = None) -> AppState:
         entry_registry=entry_registry,
         version_registry=version_registry,
     )
+    global _active_state
+    _active_state = state
+    return state

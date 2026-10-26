@@ -3,6 +3,16 @@
   import type { TableRow } from '../lib/api';
 
   const headerRows = $derived(app.payload?.table_rows.filter((r) => r.row_type === 'header') ?? []);
+
+  // Large classes (CountPrediction: 1916 entries) render in chunks on scroll.
+  let tableEl: HTMLElement | undefined = $state();
+  const CHUNK = 50; // legacy PAGE_ENTRIES
+  let renderLimit = $state(CHUNK);
+  $effect(() => {
+    headerRows;
+    renderLimit = CHUNK;
+  });
+  const visibleRows = $derived(headerRows.slice(0, renderLimit));
   const detailByRecord = $derived.by(() => {
     const map = new Map<string, TableRow[]>();
     for (const row of app.payload?.table_rows ?? []) {
@@ -15,6 +25,13 @@
     return map;
   });
 
+  function maybeLoadMore() {
+    if (!tableEl) return;
+    if (tableEl.scrollTop + tableEl.clientHeight > tableEl.scrollHeight - 400) {
+      renderLimit = Math.min(renderLimit + CHUNK, headerRows.length);
+    }
+  }
+
   function specSummary(row: TableRow): string {
     const spec = row.spec;
     if (!spec) return '';
@@ -23,14 +40,14 @@
   }
 </script>
 
-<section class="table">
+<section class="table" bind:this={tableEl} onscroll={maybeLoadMore}>
   <div class="rows">
     {#if headerRows.length === 0}
       <div class="empty">
         {#if app.loading}building state…{:else}Select a class on the left.{/if}
       </div>
     {/if}
-    {#each headerRows as row (row.record_id)}
+    {#each visibleRows as row (row.record_id)}
       <div class="group" class:has-details={app.rowDisplay === 'all'}>
         <div class="group-label mono">{row.class_name}</div>
         <button
@@ -74,6 +91,13 @@
         </button>
       </div>
     {/each}
+    {#if renderLimit < headerRows.length}
+      <div class="more-row">
+        <span>Showing {renderLimit} of {headerRows.length} entries</span>
+        <button onclick={() => (renderLimit = headerRows.length)}>Show all</button>
+      </div>
+      <div class="sentinel" data-sentinel></div>
+    {/if}
   </div>
 </section>
 
@@ -181,6 +205,25 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .more-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--s-2);
+    padding: var(--s-2);
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+  }
+
+  .more-row button {
+    color: var(--accent-text);
+    text-decoration: underline;
+  }
+
+  .sentinel {
+    height: 1px;
   }
 
   .empty {
