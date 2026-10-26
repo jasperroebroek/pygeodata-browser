@@ -3,8 +3,10 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 
 const BACKEND = process.env.PGB_BACKEND ?? 'http://127.0.0.1:8780';
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [svelte()],
+  // Relative base so the built bundle works behind any mount point (/app).
+  base: command === 'build' ? './' : '/',
   server: {
     port: 5173,
     proxy: {
@@ -12,7 +14,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: 'dist',
+    outDir: '../api/static/app',
     emptyOutDir: true,
   },
-});
+}));

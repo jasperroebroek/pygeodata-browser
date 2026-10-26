@@ -12,7 +12,17 @@ import uuid
 from contextlib import redirect_stdout
 from pathlib import Path
 
-from flask import Flask, Response, abort, jsonify, render_template, request, send_file
+from flask import (
+    Flask,
+    Response,
+    abort,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    send_from_directory,
+)
 from pygeodata.cache import clean_cache, clean_source_registry
 from pygeodata.catalog import store
 from pygeodata.config import FORMAT_VERSION, get_config
@@ -79,6 +89,28 @@ def _path_allowed(path_str: str) -> bool:
 @app.get('/')
 def index():
     return render_template('index.html')
+
+
+_APP_DIST = Path(__file__).parent / 'static' / 'app'
+
+
+@app.get('/app')
+def svelte_redirect():
+    return redirect('./app/', code=302)
+
+
+@app.get('/app/')
+def svelte_index():
+    """The built Svelte frontend; run `npm run build` in app/ if missing."""
+    index = _APP_DIST / 'index.html'
+    if not index.exists():
+        abort(404, 'Svelte app not built: run npm run build in the app/ directory')
+    return send_from_directory(_APP_DIST, 'index.html')
+
+
+@app.get('/app/<path:filename>')
+def svelte_asset(filename: str):
+    return send_from_directory(_APP_DIST, filename)
 
 
 @app.get('/api/bootstrap')

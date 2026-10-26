@@ -27,11 +27,13 @@ class EntryStore:
         self._registry = entry_registry
         self._vreg = version_registry
         self._records_by_class: dict[str, list] = {}
+        self._records_by_id: dict[str, object] = {}
         self._class_of: dict[str, str] = {}
         for rec in entry_registry.records.values():
             if rec.state_hash is None:
                 continue
             self._records_by_class.setdefault(rec.class_name or '', []).append(rec)
+            self._records_by_id[rec.state_hash] = rec
             self._class_of[rec.state_hash] = rec.class_name or ''
         self._entries_by_class: dict[str, list[EntryInfo]] = {}
         self._by_id: dict[str, EntryInfo] = {}
@@ -110,11 +112,7 @@ class EntryStore:
         return self._records_by_class.get(class_name, [])
 
     def record(self, record_id: str):
-        class_name = self._class_of.get(record_id)
-        for rec in self._records_by_class.get(class_name, []):
-            if rec.state_hash == record_id:
-                return rec
-        return None
+        return self._records_by_id.get(record_id)
 
     def dep_hashes(self) -> set[str]:
         return {

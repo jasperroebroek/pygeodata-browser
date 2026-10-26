@@ -63,6 +63,8 @@ class AppContext:
                 _reconcile()
                 self.state = build_state(progress=self.progress)
                 self.load_error = None
+                _prewarm_async(self.state)
+                _prewarm_async(self.state)
             except Exception:
                 self.load_error = traceback.format_exc()
             finally:
@@ -98,6 +100,26 @@ class AppContext:
 
     def is_loading(self) -> bool:
         return not self.ready.is_set()
+
+
+def _prewarm_async(state: AppState) -> None:
+    """Enrich one class in the background: absorbs per-process warm-up costs
+    (engine setup, first display query) so the first user selection is fast."""
+
+    def _warm():
+        try:
+            for_class = getattr(state.entries, 'for_class', None)
+            if for_class is None:
+                return
+            for class_name in state.entry_registry.class_names:
+                if state.entries.records_for_class(class_name):
+                    _log.info('prewarming %s', class_name)
+                    for_class(class_name)
+                    return
+        except Exception:
+            _log.debug('prewarm failed', exc_info=True)
+
+    threading.Thread(target=_warm, daemon=True).start()
 
 
 def _reconcile() -> None:

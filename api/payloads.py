@@ -187,6 +187,12 @@ def _build_visible_groups(
         ):
             continue
 
+        # The selected-class check lives in _entry_is_visible, but the entries
+        # lookup happens first — with lazy per-class enrichment that would
+        # enrich every class on a single selection, so skip early here instead.
+        if selected_classes and class_name not in selected_classes:
+            continue
+
         record_ids = state.get_state_hashes(class_name)
 
         visible_entries = [
