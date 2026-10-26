@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app } from '../lib/stores.svelte';
+  import { app, setSelectedEntries } from '../lib/stores.svelte';
   import { api } from '../lib/api';
   import type { TableRow } from '../lib/api';
   import { exportApi } from '../lib/apiExport';
@@ -25,11 +25,21 @@
   let exportError = $state<string | null>(null);
   let warnings = $state<string[]>([]);
 
-  const baseIds = $derived(app.payload?.visible_entry_ids ?? fallbackIds ?? []);
+  // The cart (Select mode in the entries view) takes priority; without one we
+  // fall back to the entries currently visible there.
+  const cartActive = $derived(app.selectedEntries.length > 0);
+  const baseIds = $derived(
+    cartActive ? app.selectedEntries : (app.payload?.visible_entry_ids ?? fallbackIds ?? []),
+  );
   const exportIds = $derived(new Set(baseIds.filter((id) => !excluded.has(id))));
   const count = $derived(exportIds.size);
-  const countLabel = $derived(`${count} entr${count === 1 ? 'y' : 'ies'}`);
+  const countLabel = $derived(
+    cartActive
+      ? `${count} selected entr${count === 1 ? 'y' : 'ies'}`
+      : `${count} entr${count === 1 ? 'y' : 'ies'}`,
+  );
   const selectedEntry = $derived(app.selectedEntry);
+  const showCartHint = $derived(!app.selectMode && app.selectedEntries.length === 0);
 
   const previewRows = $derived.by(() => {
     const out: TableRow[] = [];
@@ -56,6 +66,16 @@
     return () => {
       cancelled = true;
     };
+  });
+
+  // Per-row exclusions belong to the current base set; start fresh when the
+  // source flips between the cart and the visible entries.
+  let lastSource = '';
+  $effect(() => {
+    const source = cartActive ? 'cart' : 'visible';
+    if (source === lastSource) return;
+    lastSource = source;
+    excluded = new Set();
   });
 
   let lastTableKey = '';
@@ -151,7 +171,12 @@
   <div class="export-card">
     <div class="export-hd">
       <span class="export-title">Export</span>
-      <span class="export-count">{countLabel}</span>
+      <span class="export-count" class:cart={cartActive}>{countLabel}</span>
+      {#if cartActive}
+        <button class="clear-btn" onclick={() => setSelectedEntries([])} title="Clear selected entries">
+          Clear
+        </button>
+      {/if}
       {#if showProgress}
         <div class="progress">
           <div class="track">
@@ -192,19 +217,37 @@
       <div class="error">{exportError}</div>
     {/if}
 
+    {#if showCartHint}
+      <div class="cart-note">
+        <span class="dot dot--info"></span>
+        Enable Select in the entries view to export a specific subset.
+      </div>
+    {/if}
+
     <div class="export-body">
       {#if baseIds.length === 0}
         <div class="empty">
-          No visible entries. Select classes in the entries view first — the export will include
-          the entries currently visible there.
+          {#if cartActive}
+            No entries selected.
+          {:else}
+            No visible entries. Select classes in the entries view first — the export will include
+            the entries currently visible there.
+          {/if}
         </div>
       {:else if count === 0}
-        <div class="empty">All visible entries have been removed from this export.</div>
+        <div class="empty">
+          {#if cartActive}
+            All selected entries have been removed from this export.
+          {:else}
+            All visible entries have been removed from this export.
+          {/if}
+        </div>
       {:else}
         {#if baseIds.length > PREVIEW_FETCH_CAP}
           <div class="preview-note">
-            Preview shows the first {PREVIEW_FETCH_CAP} of {baseIds.length} visible entries —
-            the export includes all {count} included entr{count === 1 ? 'y' : 'ies'}.
+            Preview shows the first {PREVIEW_FETCH_CAP} of {baseIds.length}
+            {cartActive ? 'selected' : 'visible'} entries — the export includes all {count} included
+            entr{count === 1 ? 'y' : 'ies'}.
           </div>
         {/if}
         {#if loadingTable}
@@ -268,6 +311,43 @@
   .export-count {
     font-size: var(--fs-xs);
     color: var(--text-3);
+  }
+
+  .export-count.cart {
+    color: var(--accent-text);
+    background: var(--accent-soft);
+    padding: 1px 8px;
+    border-radius: var(--r-full);
+  }
+
+  .clear-btn {
+    padding: 1px 8px;
+    font-size: var(--fs-xs);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-full);
+    background: var(--bg-elev);
+    color: var(--text-2);
+  }
+
+  .clear-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+  }
+
+  .cart-note {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: var(--s-1) var(--s-3);
+    border-bottom: 1px solid var(--border);
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    background: var(--bg-panel);
+  }
+
+  .cart-note .dot--info {
+    background: var(--accent);
   }
 
   .spacer {
