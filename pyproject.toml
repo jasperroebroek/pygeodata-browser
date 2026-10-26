@@ -30,8 +30,8 @@ test = [
 [tool.setuptools.dynamic]
 version = { attr = "pygeodata_browser.__version__" }
 
-[tool.setuptools.packages.find]
-include = ["pygeodata_browser*"]
+[tool.setuptools.package-dir]
+pygeodata_browser = "api"
 
 [tool.setuptools.package-data]
 pygeodata_browser = [
@@ -44,4 +44,4 @@ pygeodata_browser = [".DS_Store", "**/.DS_Store"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
-testpaths = ["tests"]
+testpaths = ["api/tests"]
