@@ -1,0 +1,2 @@
+# The source archive ships the prebuilt frontend (api/static/app), not its Svelte source.
+prune app
