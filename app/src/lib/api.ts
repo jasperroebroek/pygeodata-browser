@@ -63,11 +63,18 @@ export interface ParamRow {
   depth?: number;
 }
 
+export interface FoundEntry {
+  record_id: string;
+  class_name: string;
+  object_type: string | null;
+}
+
 export interface LinkedEntry {
   param_name: string;
   class_name: string;
   state_hash: string | null;
-  params_summary: Record<string, string>;
+  /** List params use a `name[]` key with every item's value. */
+  params_summary: Record<string, string[]>;
 }
 
 export interface CoOutput {
@@ -194,6 +201,12 @@ export interface BootstrapRow {
   created_at: number | null;
 }
 
+/**
+ * GET that bypasses the HTTP cache. The API sends ETags, and Safari can hand a
+ * bodiless 304 to fetch() when it revalidates; the app keeps its own caches.
+ */
+export const fetchFresh = (url: string) => fetch(url, { cache: 'no-store' });
+
 async function postJSON<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
     method: 'POST',
@@ -205,7 +218,7 @@ async function postJSON<T>(url: string, body: unknown): Promise<T> {
 }
 
 async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
+  const res = await fetchFresh(url);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${url}`);
   return res.json() as Promise<T>;
 }
@@ -223,6 +236,17 @@ export const api = {
     const q = new URLSearchParams(params);
     return getJson<EntriesPagePayload>(`/api/class-entries?${q.toString()}`);
   },
+
+  pins: () => getJson<{ pins: FoundEntry[] }>('/api/pins'),
+
+  async setPinned(recordId: string, pinned: boolean): Promise<FoundEntry[]> {
+    const res = await fetch(`/api/pins/${encodeURIComponent(recordId)}`, { method: pinned ? 'PUT' : 'DELETE' });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return ((await res.json()) as { pins: FoundEntry[] }).pins;
+  },
+
+  findEntries: (prefix: string) =>
+    getJson<{ entries: FoundEntry[] }>(`/api/find-entries?q=${encodeURIComponent(prefix)}`),
 
   entryDetail(recordId: string): Promise<DetailPayload> {
     return getJson<DetailPayload>(`/api/entry/${encodeURIComponent(recordId)}`);

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import {
     BOOLEAN_TARGETS,
     classesState,
@@ -43,10 +44,11 @@
   const optLabel = (o: string | { label: string }) => (typeof o === 'string' ? o : o.label);
 </script>
 
-{#snippet header(id: SectionId, title: string)}
+{#snippet header(id: SectionId, title: string, meta: string = '')}
   <button class="sb-section-hd" onclick={() => (openSection = openSection === id ? null : id)}>
     <span class="sb-section-title">{title}</span>
-    <span class="sb-chevron">▾</span>
+    {#if meta}<span class="sb-section-meta">{meta}</span>{/if}
+    <span class="sb-chevron"><ChevronRight size={13} /></span>
   </button>
 {/snippet}
 

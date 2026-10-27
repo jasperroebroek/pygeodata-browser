@@ -14,6 +14,7 @@
 
 /* Each pane shares the same column structure */
 .code-pane {
+  position: relative;
   display: flex;
   flex-direction: column;
   overflow: hidden;

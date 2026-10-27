@@ -3,9 +3,11 @@
 import json
 from pathlib import Path
 
+import pytest
 from pygeodata.catalog.types import EntryInfo, SpecInfo
 from pygeodata.config import JSONKeys, set_config
 from pygeodata.registries.versioning import VersionRegistry
+from pygeodata.tracked_object import TrackedObject
 from pygeodata_browser import code_service
 
 # ---------------------------------------------------------------------------
@@ -127,3 +129,38 @@ def test_version_diff_result_keys(tmp_path: Path):
         result = code_service.version_diff(vreg, base_version_id=initial_vid, target_version_id=initial_vid)
 
     assert set(result.keys()) >= {'changes', 'base_version_id', 'has_live_stale'}
+
+
+# ---------------------------------------------------------------------------
+# Live code without a stored snapshot
+# ---------------------------------------------------------------------------
+
+
+def test_diff_and_snapshot_fall_back_to_loaded_class_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Edited-but-not-yet-run classes have no stored source; the loaded class supplies it."""
+    registry = tmp_path / '.source'
+    _write_code_snapshot(registry, 'h1', 'MyLoader', 'class MyLoader:\n    x = 1\n')
+
+    class MyLoader:
+        @classmethod
+        def get_class_name(cls) -> str:
+            return 'MyLoader'
+
+    monkeypatch.setattr(TrackedObject, 'get_registered_objects', classmethod(lambda _cls: {MyLoader}))
+    monkeypatch.setattr(code_service, 'calculate_cls_source_hash', lambda _cls: 'live1')
+    monkeypatch.setattr(code_service, 'get_source_code', lambda _cls: 'class MyLoader:\n    x = 2\n')
+
+    with set_config(path_cache=tmp_path / 'data', path_figures=tmp_path / 'figs', path_registry=registry):
+        vreg = VersionRegistry(registry)
+        diff = code_service.diff_hashes('h1', 'live1', full=True, vreg=vreg)
+        snapshot = code_service.snapshot_html('live1', vreg)
+        missing = code_service.diff_hashes('h1', 'unknown', full=False, vreg=vreg)
+
+    assert diff is not None
+    assert diff['full_new'] == 'class MyLoader:\n    x = 2\n'
+    assert [line['type'] for line in diff['hunks'][0]['lines']] == ['ctx', 'del', 'add']
+    assert snapshot == {
+        'class_name': 'MyLoader',
+        'lines': [{'text': 'class MyLoader:', 'cls_link': None}, {'text': '    x = 2', 'cls_link': None}],
+    }
+    assert missing is None

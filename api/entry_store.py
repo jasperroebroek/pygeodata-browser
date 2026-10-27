@@ -111,6 +111,9 @@ class EntryStore:
     def records_for_class(self, class_name: str) -> list:
         return self._records_by_class.get(class_name, [])
 
+    def class_of(self, record_id: str) -> str | None:
+        return self._class_of.get(record_id)
+
     def record(self, record_id: str):
         return self._records_by_id.get(record_id)
 

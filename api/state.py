@@ -67,10 +67,8 @@ class AppContext:
         def _load() -> None:
             try:
                 _reconcile()
-                _reconcile()
                 self.state = build_state(progress=self.progress)
                 self.load_error = None
-                _prewarm_async(self.state)
                 _prewarm_async(self.state)
             except Exception:
                 self.load_error = traceback.format_exc()
@@ -98,6 +96,7 @@ class AppContext:
                 _reconcile()
                 self.state = build_state(progress=self.progress)
                 self.load_error = None
+                _prewarm_async(self.state)
             except Exception:
                 self.load_error = traceback.format_exc()
             finally:

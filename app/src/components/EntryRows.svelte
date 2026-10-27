@@ -1,6 +1,8 @@
 <script lang="ts">
+  import Download from '@lucide/svelte/icons/download';
   import type { TableRow } from '../lib/api';
   import { softBreak } from '../lib/format';
+  import PinToggle from './PinToggle.svelte';
   import TypeBadge from './TypeBadge.svelte';
 
   // Card-style entry table body shared by the entries view and the export view.
@@ -52,20 +54,13 @@
             <button
               class="select-icon"
               class:select-icon--in={cart}
+              role="checkbox"
+              aria-checked={cart}
               title={cart ? 'Remove from export' : 'Add to export'}
               aria-label={cart ? 'Remove from export' : 'Add to export'}
               onclick={(e) => {
                 e.stopPropagation();
                 onToggleCart(r.record_id);
-              }}
-            ></button>
-            <button
-              class="dl-icon"
-              title="Download this entry"
-              aria-label="Download this entry"
-              onclick={(e) => {
-                e.stopPropagation();
-                onDownload(r.record_id);
               }}
             ></button>
             <span class="cell-entry-left">
@@ -81,6 +76,20 @@
             </span>
             <span class="cell-entry-spec">
               {#each specParts(r) as part, j (j)}<span class="tbl-spec-pill">{part}</span>{/each}
+            </span>
+            <span class="entry-actions">
+              <PinToggle entry={r} />
+              <button
+                class="icon-btn icon-btn--xs entry-dl"
+                title="Download this entry"
+                aria-label="Download this entry"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  onDownload(r.record_id);
+                }}
+              >
+                <Download size={13} />
+              </button>
             </span>
           </div>
         </td>

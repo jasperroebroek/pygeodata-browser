@@ -1,21 +1,28 @@
 <script lang="ts">
+  import Activity from '@lucide/svelte/icons/activity';
+  import List from '@lucide/svelte/icons/list';
+  import ListChecks from '@lucide/svelte/icons/list-checks';
+  import Pin from '@lucide/svelte/icons/pin';
+  import Search from '@lucide/svelte/icons/search';
+  import Table2 from '@lucide/svelte/icons/table-2';
   import {
     filterState,
     layout,
+    pinsState,
     selection,
     setEntriesMode,
     setKindFilter,
-    setParamDisplay,
-    setView,
-    toggleHideStale,
+    setPinnedOnly,
     toggleSelectMode,
     ui,
   } from '../lib/stores.svelte';
   import type { KindFilter, View } from '../lib/stores.svelte';
-  import { codeUi, setBrowseMode, setHideEmpty } from '../lib/nav.svelte';
+  import { codeUi, setBrowseMode, switchView } from '../lib/nav.svelte';
   import type { CodeKind } from '../lib/nav.svelte';
   import { openModal } from '../lib/modal.svelte';
+  import { palette } from '../lib/palette.svelte';
   import Menu from './Menu.svelte';
+  import ViewSettings from './ViewSettings.svelte';
 
   const views: { key: View; label: string }[] = [
     { key: 'entries', label: 'Entries' },
@@ -32,6 +39,8 @@
 
   const codeKinds: { key: CodeKind; label: string }[] = [...kinds, { key: 'trackedobject', label: 'Object' }];
 
+  const isMac = navigator.platform.toLowerCase().includes('mac');
+
   const exportCount = $derived(selection.selectedEntries.length);
 </script>
 
@@ -39,8 +48,8 @@
   <div class="topbar-left">
     <div class="view-tabs">
       {#each views as v (v.key)}
-        <button class="view-tab" class:active={ui.view === v.key} onclick={() => setView(v.key)}>
-          {v.label}
+        <button class="view-tab" class:active={ui.view === v.key} onclick={() => switchView(v.key)}>
+          <span class="tab-label" data-label={v.label}>{v.label}</span>
           {#if v.key === 'export' && exportCount > 0}<span class="tab-badge">{exportCount}</span>{/if}
         </button>
       {/each}
@@ -51,25 +60,38 @@
         <div class="kind-group">
           {#each kinds as k (k.key)}
             <button class="kind-tab" class:active={filterState.kindFilter === k.key} onclick={() => void setKindFilter(k.key)}>
-              {k.label}
+              <span class="tab-label" data-label={k.label}>{k.label}</span>
             </button>
           {/each}
+        </div>
+        <div class="kind-group">
+          <button
+            class="kind-tab kind-tab--pinned"
+            class:active={filterState.pinnedOnly}
+            title={filterState.pinnedOnly ? 'Show all entries' : 'Show only pinned entries'}
+            aria-pressed={filterState.pinnedOnly}
+            onclick={() => void setPinnedOnly(!filterState.pinnedOnly)}
+          >
+            <Pin size={13} fill={filterState.pinnedOnly ? 'currentColor' : 'none'} />
+            <span class="tab-label" data-label="Pinned">Pinned</span>
+            {#if pinsState.list.length}<span class="tab-badge">{pinsState.list.length}</span>{/if}
+          </button>
         </div>
       </div>
     {:else if ui.view === 'code'}
       <div class="topbar-toolbar-section">
         <div class="kind-group">
           <button class="kind-tab" class:active={codeUi.browseMode === 'version'} onclick={() => setBrowseMode('version')}>
-            By version
+            <span class="tab-label" data-label="By version">By version</span>
           </button>
           <button class="kind-tab" class:active={codeUi.browseMode === 'class'} onclick={() => setBrowseMode('class')}>
-            By class
+            <span class="tab-label" data-label="By class">By class</span>
           </button>
         </div>
         <div class="kind-group">
           {#each codeKinds as k (k.key)}
             <button class="kind-tab" class:active={codeUi.kindFilter === k.key} onclick={() => (codeUi.kindFilter = k.key)}>
-              {k.label}
+              <span class="tab-label" data-label={k.label}>{k.label}</span>
             </button>
           {/each}
         </div>
@@ -77,48 +99,50 @@
     {/if}
   </div>
   <div class="topbar-right">
+    <button class="search-btn" title="Quick switcher" onclick={() => (palette.open = true)}>
+      <Search size={15} />
+      <span>Jump to…</span>
+      <kbd>{isMac ? '⌘' : 'Ctrl+'}K</kbd>
+    </button>
     {#if ui.view === 'entries'}
-      <div class="topbar-toolbar-section">
-        <div class="kind-group">
-          <button class="kind-tab" class:active={layout.entriesMode === 'compact'} onclick={() => void setEntriesMode('compact')}>
-            Compact
-          </button>
-          <button class="kind-tab" class:active={layout.entriesMode === 'detailed'} onclick={() => void setEntriesMode('detailed')}>
-            Detailed
-          </button>
-        </div>
-        <div class="kind-group" class:seg-disabled={layout.entriesMode === 'compact'}>
-          <button
-            class="kind-tab"
-            class:active={filterState.paramDisplay === 'selected'}
-            title="Only parameter rows matching the active filters"
-            onclick={() => void setParamDisplay('selected')}
-          >
-            Selected params
-          </button>
-          <button class="kind-tab" class:active={filterState.paramDisplay === 'all'} onclick={() => void setParamDisplay('all')}>
-            All params
-          </button>
-        </div>
-        <div class="kind-group">
-          <button class="kind-tab" class:active={filterState.hideStale} onclick={() => void toggleHideStale()}>Hide stale</button>
-        </div>
-        <div class="kind-group">
-          <button class="kind-tab" class:active={selection.selectMode} title="Toggle entry selection for export" onclick={toggleSelectMode}>
-            Select
-          </button>
-        </div>
+      <div class="kind-group">
+        <button
+          class="kind-tab kind-tab--icon"
+          class:active={layout.entriesMode === 'compact'}
+          title="Compact list"
+          aria-label="Compact"
+          onclick={() => void setEntriesMode('compact')}
+        >
+          <List size={18} />
+        </button>
+        <button
+          class="kind-tab kind-tab--icon"
+          class:active={layout.entriesMode === 'detailed'}
+          title="Detailed table with parameter rows"
+          aria-label="Detailed"
+          onclick={() => void setEntriesMode('detailed')}
+        >
+          <Table2 size={18} />
+        </button>
       </div>
-    {:else if ui.view === 'code'}
-      <div class="topbar-toolbar-section">
-        <div class="kind-group">
-          <button class="kind-tab" class:active={codeUi.hideEmpty} onclick={() => setHideEmpty(!codeUi.hideEmpty)}>Hide empty</button>
-        </div>
+      <div class="kind-group">
+        <button
+          class="kind-tab kind-tab--icon"
+          class:active={selection.selectMode}
+          title="Select entries for export"
+          aria-label="Select"
+          onclick={toggleSelectMode}
+        >
+          <ListChecks size={18} />
+        </button>
       </div>
     {/if}
-    <button class="ghost-btn topbar-icon-btn btn-diag" title="Diagnostics" onclick={() => openModal('Registry diagnostics', { kind: 'diagnostics' }, 'sm')}>
-      ⓘ
-    </button>
-    <Menu />
+    <div class="topbar-icons">
+      <ViewSettings />
+      <button class="icon-btn" title="Registry diagnostics" onclick={() => openModal('Registry diagnostics', { kind: 'diagnostics' }, 'sm')}>
+        <Activity size={20} />
+      </button>
+      <Menu />
+    </div>
   </div>
 </nav>

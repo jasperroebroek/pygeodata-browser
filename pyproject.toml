@@ -33,11 +33,14 @@ version = { attr = "pygeodata_browser.__version__" }
 [tool.setuptools.package-dir]
 pygeodata_browser = "api"
 
+# static/app/ is the built frontend: `npm run build` in app/ writes it, the release
+# workflow builds it before packaging, and it is not committed. app/ (the Svelte
+# source) is not packaged.
 [tool.setuptools.package-data]
 pygeodata_browser = [
-    "static/**/*",
-    "templates/**/*",
-]  # static/app/* is the built Svelte frontend (app/ is its source)
+    "static/app/**/*",
+    "templates/*.html",
+]
 
 [tool.setuptools.exclude-package-data]
 pygeodata_browser = [".DS_Store", "**/.DS_Store"]

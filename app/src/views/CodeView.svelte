@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { filterState, navigateToClass } from '../lib/stores.svelte';
+  import { filterState, layout, navigateToClass } from '../lib/stores.svelte';
   import { codeNav, codeUi } from '../lib/nav.svelte';
   import { toast } from '../lib/toast.svelte';
   import {
@@ -13,6 +13,8 @@
     type VersionChange,
     type VersionDiffPayload,
   } from '../lib/apiCode';
+  import ReloadBar from '../components/ReloadBar.svelte';
+  import Resizer from '../components/Resizer.svelte';
   import TypeBadge from '../components/TypeBadge.svelte';
   import DiffTable from '../components/code/DiffTable.svelte';
   import SnapshotTable from '../components/code/SnapshotTable.svelte';
@@ -35,6 +37,10 @@
   let versionClasses = $state<CodeClassState[]>([]);
   let selectedVersion = $state<string | null>(null); // version_id or 'live'
   let selectedClass = $state<string | null>(null);
+
+  $effect(() => {
+    codeNav.currentClass = selectedClass;
+  });
 
   let classFilter = $state('');
   let allClassFilter = $state('');
@@ -468,8 +474,13 @@
     if (versionsLoading) return;
     const target = codeNav.target;
     const diffId = codeNav.diffRecordId;
+    const versionId = codeNav.versionId;
     untrack(() => {
-      if (target) {
+      if (versionId) {
+        codeNav.versionId = null;
+        started = true;
+        void selectVersion(versionId);
+      } else if (target) {
         codeNav.target = null;
         started = true;
         void selectCodeTarget(target.className, target.depHash ?? null, target.sourceHash ?? null);
@@ -534,7 +545,8 @@
 {/snippet}
 
 <div class="view-code">
-  <div class="code-pane code-pane--versions">
+  <div class="code-pane code-pane--versions" style:flex={layout.widths.codeVersions ? `0 0 ${layout.widths.codeVersions}px` : null}>
+    <Resizer pane="codeVersions" edge="right" min={200} max={() => window.innerWidth * 0.35} />
     <div class="code-pane-filter-row">
       {#if codeUi.browseMode === 'class'}
         <input class="code-filter" placeholder="Filter classes…" bind:value={allClassFilter} />
@@ -570,7 +582,8 @@
     </div>
   </div>
 
-  <div class="code-pane code-pane--classes">
+  <div class="code-pane code-pane--classes" style:flex={layout.widths.codeClasses ? `0 0 ${layout.widths.codeClasses}px` : null}>
+    <Resizer pane="codeClasses" edge="right" min={200} max={() => window.innerWidth * 0.4} />
     <div class="code-pane-filter-row">
       {#if codeUi.browseMode === 'version'}
         <input class="code-filter" placeholder="Filter…" bind:value={classFilter} />
@@ -597,6 +610,7 @@
   </div>
 
   <div class="code-pane code-pane--source">
+    <ReloadBar />
     <div class="code-source-actions">
       <span class="pane-title">{title}</span>
       <span class="main-hd-spacer"></span>

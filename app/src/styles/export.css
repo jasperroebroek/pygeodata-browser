@@ -1,3 +1,4 @@
+/* ---------------------------------------------------------------
    Select-mode + icon (shown in entries view when mode is active)
    --------------------------------------------------------------- */
 
@@ -19,60 +20,47 @@
   line-height: 1;
 }
 
-/* + / − select icon — hidden until select mode is active */
+/* Export-cart checkbox — hidden until select mode is active */
 .select-icon {
   display: none;
   flex-shrink: 0;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
   border: 1.5px solid var(--border);
-  background: none;
+  background: var(--surface);
   cursor: pointer;
   position: relative;
   padding: 0;
   transition: border-color 0.1s, background 0.1s;
 }
 
-/* + symbol via pseudo-elements */
-.select-icon::before,
-.select-icon::after {
-  content: '';
-  position: absolute;
-  background: var(--muted);
-  border-radius: 1px;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-}
-.select-icon::before { width: 8px; height: 1.5px; }
-.select-icon::after  { width: 1.5px; height: 8px; }
-
 .select-icon:hover {
   border-color: var(--accent);
 }
-.select-icon:hover::before,
-.select-icon:hover::after {
-  background: var(--accent);
-}
 
-/* − state: solid filled circle, vertical bar hidden */
 .select-icon--in {
-  background: var(--accent-bg);
-  border-color: var(--accent-mid);
-}
-.select-icon--in::before { background: var(--accent); }
-.select-icon--in::after  { display: none; }
-
-.select-icon--in:hover {
-  background: var(--accent-bg2);
+  background: var(--accent);
   border-color: var(--accent);
+}
+
+/* Checkmark */
+.select-icon--in::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 45%;
+  width: 4px;
+  height: 8px;
+  border: solid var(--on-accent);
+  border-width: 0 1.75px 1.75px 0;
+  transform: translate(-50%, -50%) rotate(45deg);
 }
 
 /* Show icons only when select mode is active */
 body.select-mode .select-icon { display: inline-flex; align-items: center; justify-content: center; }
 
-/* In the export view the button is always visible (acts as remove/minus) */
+/* In the export view the checkbox is always visible (unchecking removes the entry) */
 .view-export .select-icon { display: inline-flex; align-items: center; justify-content: center; }
 
 /* Highlight selected entries */
@@ -91,59 +79,12 @@ body.select-mode .select-icon { display: inline-flex; align-items: center; justi
   margin-right: 4px;
 }
 
-/* Download-single button — same size/shape, download arrow via pseudo-elements */
-.dl-icon {
-  display: none;
-  flex-shrink: 0;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  border: 1.5px solid var(--border);
-  background: none;
-  cursor: pointer;
-  position: relative;
-  padding: 0;
-  transition: border-color 0.1s;
-}
-/* vertical stem */
-.dl-icon::before {
-  content: '';
-  position: absolute;
-  background: var(--muted);
-  border-radius: 1px;
-  width: 1.5px;
-  height: 6px;
-  top: 3px;
-  left: 50%;
-  transform: translateX(-50%);
-}
-/* downward chevron */
-.dl-icon::after {
-  content: '';
-  position: absolute;
-  border-left: 1.5px solid var(--muted);
-  border-bottom: 1.5px solid var(--muted);
-  width: 5px;
-  height: 5px;
-  bottom: 4px;
-  left: 50%;
-  transform: translateX(-50%) rotate(-45deg);
-}
-.dl-icon:hover { border-color: var(--accent); }
-.dl-icon:hover::before,
-.dl-icon:hover::after { border-color: var(--accent); background: var(--accent); }
-
-body.select-mode .dl-icon { display: inline-flex; align-items: center; justify-content: center; }
-
-.cell-entry-hd-inner .dl-icon { margin-right: 6px; }
-.entry-pill .dl-icon { margin-right: 4px; }
-
-
 /* ---------------------------------------------------------------
    Export view (checkout page)
    --------------------------------------------------------------- */
 
 .view-export {
+  position: relative;
   display: flex;
   justify-content: center;
   height: calc(100vh - var(--topbar-h));
@@ -231,19 +172,3 @@ body.select-mode .dl-icon { display: inline-flex; align-items: center; justify-c
 }
 
 /* Fast mode: slim progress bar pinned under the top row while the full state builds */
-.fast-progress {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 50;
-  padding: 2px 8px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
-}
-
-.fast-progress.hidden { display: none; }
-
-.fast-progress-track { height: 3px; }
-
-.fast-progress-track .loading-bar-fill { background: var(--accent); }

@@ -1,3 +1,4 @@
+import { fetchFresh } from './api';
 import type { TableRow } from './api';
 
 export interface ExportStartResult {
@@ -29,7 +30,7 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
 }
 
 async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
+  const res = await fetchFresh(url);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${url}`);
   return (await res.json()) as T;
 }

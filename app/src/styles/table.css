@@ -80,8 +80,13 @@ tr.row-entry + tr.row-entry td.cell-entry-hd {
   padding-top: 8px;
 }
 
-/* Card inner — entry header */
+/* Card inner — entry header. Zero width + min-width 100% keeps its long spec
+   line out of the column min-content sums; WebKit otherwise spreads it over the
+   shrink-to-content columns instead of the value column. */
 .cell-entry-hd-inner {
+  width: 0;
+  min-width: 100%;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -161,17 +166,6 @@ tr.row-param td.col-indent {
   padding-left: 10px;
 }
 
-/* Vertical rail */
-tr.row-param td.col-indent::after {
-  content: "";
-  position: absolute;
-  left: 20px;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: var(--border);
-}
-
 /* Bottom of card: last param row */
 tr.row-param.entry-last td.col-scope,
 tr.row-param.entry-last td.col-param,
@@ -198,10 +192,6 @@ tr.row-param.active td.col-indent {
   border-color: var(--accent-mid);
 }
 
-tr.row-param.active td.col-indent::after {
-  background: var(--accent);
-}
-
 /* ---- Entry header content ---- */
 
 .cell-entry-left {
@@ -211,16 +201,25 @@ tr.row-param.active td.col-indent::after {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  min-width: 0;
+  flex: 0 1 auto;
+  min-width: min-content;
+  max-width: 70%;
 }
 
+/* The spec line yields to the class name and fades out where it is clipped */
+/* Spec line: right-aligned, an ellipsis only when it does not fit */
 .cell-entry-spec {
   margin-left: auto;
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-  gap: 0;
+  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: right;
   padding-left: 8px;
+  font-size: 10px;
+  color: var(--faint);
 }
 
 .entry-cls {
@@ -274,43 +273,113 @@ tr.row-param.active td.col-indent::after {
   gap: 1px;
 }
 
-.entry-pill {
+.entry-group-hd {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px;
+  padding: 10px 10px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.entry-group-hd:first-child {
+  padding-top: 4px;
+}
+
+.entry-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 4px 0 10px;
   border: none;
   border-radius: 6px;
   background: transparent;
   cursor: pointer;
   min-width: 0;
+  flex-shrink: 0;
 }
 
 .entry-pill:hover  { background: var(--s3); }
 .entry-pill.active { background: var(--accent-bg); }
 
-.entry-pill-name {
-  font-size: 12px;
-  font-weight: 600;
+.entry-pill-hash {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 11px;
   color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+.entry-pill.active .entry-pill-hash {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Spec details sit right-aligned, with an ellipsis where the pane is too narrow */
+.entry-pill-spec {
   flex: 1 1 0;
   min-width: 0;
-}
-
-.entry-pill-right {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.entry-pill-hash {
-  font-family: monospace;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: right;
   font-size: 10px;
   color: var(--faint);
+}
+
+/* Row pin and download buttons, shared by compact rows and table entry headers:
+   shown on hover; a pinned entry's pin stays visible */
+.entry-dl,
+.entry-pin {
+  opacity: 0;
+}
+
+.entry-pill:hover :is(.entry-dl, .entry-pin),
+tr.row-entry:hover :is(.entry-dl, .entry-pin),
+.entry-dl:focus-visible,
+.entry-pin:focus-visible,
+.entry-pin.active {
+  opacity: 1;
+}
+
+.entry-pin.active {
+  color: var(--accent);
+  background: none;
+}
+
+/* The pin and download buttons overlay the right end of the row, so the spec
+   line runs to the edge. On hover it fades out underneath them; a pinned row
+   shows its pin permanently, so there the spec stops short of the buttons instead
+   (no text hidden, nothing shifting on hover). */
+.entry-pill {
+  position: relative;
+}
+
+.entry-actions {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.entry-pill:hover:not(:has(.entry-pin.active)) .entry-pill-spec,
+tr.row-entry:hover .cell-entry-hd-inner:not(:has(.entry-pin.active)) .cell-entry-spec,
+:is(.entry-pill, .cell-entry-hd-inner):not(:has(.entry-pin.active)):has(.entry-actions :focus-visible)
+  :is(.cell-entry-spec, .entry-pill-spec) {
+  mask-image: linear-gradient(to left, transparent 0, transparent 44px, #000 64px);
+}
+
+/* Reserve the button area (both slots + a small gap), measured from each row's own right padding */
+.entry-pill:has(.entry-pin.active) .entry-pill-spec {
+  padding-right: 52px;
+}
+
+.cell-entry-hd-inner:has(.entry-pin.active) .cell-entry-spec {
+  padding-right: 44px;
 }
 
 .pill-flag {

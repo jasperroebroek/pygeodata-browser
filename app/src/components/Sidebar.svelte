@@ -6,9 +6,10 @@
     filterState,
     hasActiveFilters,
     layout,
+    pinsState,
+    prefetchClass,
     selection,
     setFilters,
-    setMultiClass,
     setSidebarCollapsed,
     setVersionFilter,
     tableState,
@@ -17,8 +18,14 @@
     ui,
   } from '../lib/stores.svelte';
   import { FILTER_OPERATORS, FILTER_TARGETS, SPEC_DIMENSIONS } from '../lib/filters';
+  import PanelLeftClose from '@lucide/svelte/icons/panel-left-close';
+  import PanelLeftOpen from '@lucide/svelte/icons/panel-left-open';
+  import Pin from '@lucide/svelte/icons/pin';
+  import Search from '@lucide/svelte/icons/search';
+  import X from '@lucide/svelte/icons/x';
   import FilterSections from './FilterSections.svelte';
-  import TypeBadge from './TypeBadge.svelte';
+  import KindIcon from './KindIcon.svelte';
+  import Resizer from './Resizer.svelte';
 
   let nameFilter = $state('');
 
@@ -91,6 +98,12 @@
     return out;
   });
 
+  const pinCounts = $derived.by(() => {
+    const counts = new Map<string, number>();
+    for (const p of pinsState.list) counts.set(p.class_name, (counts.get(p.class_name) ?? 0) + 1);
+    return counts;
+  });
+
   const kindCards = $derived(
     classesState.cards.filter(
       (c) => filterState.kindFilter === 'all' || (c.object_type ?? '').toLowerCase() === filterState.kindFilter,
@@ -103,6 +116,7 @@
     return kindCards.filter(
       (c) =>
         (selection.showEmpty || c.visible_record_count > 0 || selected.has(c.class_name)) &&
+        (!filterState.pinnedOnly || pinCounts.has(c.class_name)) &&
         (!q || c.class_name.toLowerCase().includes(q)),
     );
   });
@@ -127,6 +141,18 @@
     return null;
   }
 
+  let hoverTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function hoverStart(cn: string) {
+    hoverEnd();
+    hoverTimer = setTimeout(() => prefetchClass(cn), 80);
+  }
+
+  function hoverEnd() {
+    if (hoverTimer) clearTimeout(hoverTimer);
+    hoverTimer = null;
+  }
+
   function onCardKey(e: KeyboardEvent, cn: string) {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
@@ -135,13 +161,21 @@
   }
 </script>
 
-<aside class="sidebar" class:collapsed={layout.sidebarCollapsed}>
+<aside
+  class="sidebar"
+  class:collapsed={layout.sidebarCollapsed}
+  style:flex-basis={layout.widths.sidebar && !layout.sidebarCollapsed ? `${layout.widths.sidebar}px` : null}
+  style:min-width={layout.widths.sidebar && !layout.sidebarCollapsed ? `${layout.widths.sidebar}px` : null}
+>
+  {#if !layout.sidebarCollapsed}
+    <Resizer pane="sidebar" edge="right" min={240} max={() => Math.min(640, window.innerWidth * 0.4)} />
+  {/if}
   <button
-    class="sidebar-collapse-btn"
+    class="icon-btn sidebar-collapse-btn"
     title={layout.sidebarCollapsed ? 'Expand filters' : 'Collapse filters'}
     onclick={() => setSidebarCollapsed(!layout.sidebarCollapsed)}
   >
-    {layout.sidebarCollapsed ? '»' : '«'}
+    {#if layout.sidebarCollapsed}<PanelLeftOpen size={17} />{:else}<PanelLeftClose size={17} />{/if}
   </button>
   <div class="sb-count-row">
     <span class="count-chip">{shownCount === null ? '' : `${shownCount} shown`}</span>
@@ -154,7 +188,7 @@
             {#if p.meta}<span class="pill-meta">{p.meta}</span>{/if}
             {p.label}
           </span>
-          <button class="pill-rm" onclick={p.remove}>✕</button>
+          <button class="pill-rm" aria-label="Remove" onclick={p.remove}><X size={11} strokeWidth={2.5} /></button>
         </span>
       {/each}
     </div>
@@ -172,18 +206,11 @@
           {visibleCards.length < kindCards.length ? `${visibleCards.length} / ${kindCards.length}` : kindCards.length}
         {/if}
       </span>
-      <div class="class-list-toolbar">
-        <button class="toggle-btn" class:active={selection.showEmpty} onclick={() => (selection.showEmpty = !selection.showEmpty)}>
-          Show empty
-        </button>
-        <button class="toggle-btn" class:active={selection.multiClass} onclick={() => void setMultiClass(!selection.multiClass)}>
-          Multi-select
-        </button>
-      </div>
     </div>
-    <div class="class-filter-row">
-      <input class="code-filter" placeholder="Filter classes…" bind:value={nameFilter} />
-    </div>
+    <label class="class-filter-row">
+      <Search size={13} />
+      <input class="class-filter" placeholder="Filter classes…" bind:value={nameFilter} />
+    </label>
     <div class="class-list">
       {#if classesState.cards.length === 0}
         {#each bootstrapNames as r (r.class_name)}
@@ -202,15 +229,25 @@
             role="button"
             tabindex="0"
             onclick={(e) => void toggleClass(c.class_name, e.metaKey || e.ctrlKey)}
+            onmouseenter={() => hoverStart(c.class_name)}
+            onmouseleave={hoverEnd}
             onkeydown={(e) => onCardKey(e, c.class_name)}
           >
+            <KindIcon type={c.object_type} size={14} />
             <span class="class-card-name"
               >{c.class_name}{#if dot}<span class="status-dot {dot.cls}" title={dot.title}></span>{/if}</span
             >
-            <span class="class-card-meta">
-              <span class="class-card-count">{c.visible_record_count}/{c.total_record_count}</span>
-              <TypeBadge type={c.object_type} />
-            </span>
+            {#if pinCounts.get(c.class_name)}
+              {@const n = pinCounts.get(c.class_name)}
+              <span class="class-card-pins" title="{n} pinned {n === 1 ? 'entry' : 'entries'}"
+                ><Pin size={11} fill="currentColor" />{n}</span
+              >
+            {/if}
+            <span class="class-card-count"
+              >{c.visible_record_count === c.total_record_count
+                ? c.total_record_count
+                : `${c.visible_record_count}/${c.total_record_count}`}</span
+            >
           </div>
         {/each}
       {/if}

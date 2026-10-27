@@ -1,4 +1,4 @@
-import { api } from './api';
+import { api, fetchFresh } from './api';
 import { toast } from './toast.svelte';
 import type {
   BootstrapRow,
@@ -6,6 +6,7 @@ import type {
   ClassesPayload,
   DetailPayload,
   EntriesPagePayload,
+  FoundEntry,
   StatusPayload,
   TableRow,
   VersionOption,
@@ -72,11 +73,24 @@ export const ui = $state({
   bootstrap: [] as BootstrapRow[],
 });
 
+export type PaneKey = 'sidebar' | 'detail' | 'codeVersions' | 'codeClasses';
+
+const PANES: PaneKey[] = ['sidebar', 'detail', 'codeVersions', 'codeClasses'];
+const PANE_STORAGE: Record<PaneKey, string> = {
+  sidebar: 'registry.sidebar-w',
+  detail: 'registry.detail-w',
+  codeVersions: 'pgb-pane-code-versions',
+  codeClasses: 'pgb-pane-code-classes',
+};
+
 export const layout = $state({
   // Detailed on normal/wide screens, compact on narrow ones (legacy boot rule).
   entriesMode: (window.innerWidth >= 1000 ? 'detailed' : 'compact') as EntriesMode,
   sidebarCollapsed: stored('registry.sidebar-collapsed') === '1',
-  detailWidth: Number(stored('registry.detail-w')) || null,
+  // Dragged pane widths; null keeps the stylesheet default.
+  widths: Object.fromEntries(
+    PANES.map((k) => [k, Number(stored(PANE_STORAGE[k])) || null]),
+  ) as Record<PaneKey, number | null>,
 });
 
 export const filterState = $state({
@@ -87,6 +101,8 @@ export const filterState = $state({
   specFilters: {} as Record<string, string[]>,
   versionFilter: null as string | null,
   hideStale: stored('hide_stale') === 'true',
+  /** Show only pinned entries (across all classes when none is selected). */
+  pinnedOnly: false,
 });
 
 export const classesState = $state({
@@ -114,7 +130,48 @@ export const tableState = new TableState();
 export const detailState = $state({
   current: null as DetailPayload | null,
   loading: false,
+  /** The focused entry's detail failed to load (shown instead of an empty pane). */
+  failed: false,
 });
+
+/** Pinned entries (project-wide, stored next to the registry), in pin order. */
+export const pinsState = $state({ list: [] as FoundEntry[] });
+
+export const isPinned = (recordId: string) => pinsState.list.some((p) => p.record_id === recordId);
+
+export async function loadPins() {
+  try {
+    const { pins } = await api.pins();
+    if (pins) pinsState.list = pins;
+  } catch (err) {
+    console.error('pins failed', err);
+  }
+}
+
+/** Optimistic: the pin shows at once and is rolled back if the server refuses. */
+export async function setPinned(entry: FoundEntry, pinned: boolean) {
+  const before = pinsState.list;
+  pinsState.list = pinned ? [...before.filter((p) => p.record_id !== entry.record_id), entry] : before.filter((p) => p.record_id !== entry.record_id);
+  try {
+    pinsState.list = await api.setPinned(entry.record_id, pinned);
+  } catch {
+    pinsState.list = before;
+    toast(pinned ? 'Could not pin entry' : 'Could not unpin entry');
+    return;
+  }
+  // Cached pinned-view pages are now out of date.
+  firstPageCache.clear();
+  if (filterState.pinnedOnly) await loadEntries(0, true);
+}
+
+export async function setPinnedOnly(on: boolean) {
+  filterState.pinnedOnly = on;
+  await loadEntries(0, true);
+  const first = tableState.rows.find((r) => r.row_type === 'header');
+  if (on && first && !tableState.rows.some((r) => r.record_id === tableState.selectedEntry)) {
+    await selectEntry(first.record_id);
+  }
+}
 
 export const selection = $state({
   selectMode: false,
@@ -126,6 +183,18 @@ export const selection = $state({
 // Entry details are immutable (content-addressed by state_hash): cache in the
 // session, never refetch. Cleared on rebuild, since staleness badges change.
 const detailCache = new Map<string, DetailPayload>();
+const detailInflight = new Map<string, Promise<DetailPayload>>();
+
+// First entry pages by URL (the URL carries every filter). State only changes on
+// rebuild, so they stay valid until then; this makes revisits and hover prefetch instant.
+const firstPageCache = new Map<string, Promise<EntriesPagePayload>>();
+const FIRST_PAGE_CACHE_SIZE = 24;
+
+function clearCaches() {
+  detailCache.clear();
+  detailInflight.clear();
+  firstPageCache.clear();
+}
 
 export function rowDisplay(): 'none' | ParamDisplay {
   return layout.entriesMode === 'compact' ? 'none' : filterState.paramDisplay;
@@ -162,9 +231,15 @@ export function setSidebarCollapsed(collapsed: boolean) {
   store('registry.sidebar-collapsed', collapsed ? '1' : '0');
 }
 
-export function setDetailWidth(px: number) {
-  layout.detailWidth = Math.round(px);
-  store('registry.detail-w', String(layout.detailWidth));
+/** Persist a dragged pane width; null resets it to the stylesheet default. */
+export function setPaneWidth(pane: PaneKey, px: number | null) {
+  layout.widths[pane] = px === null ? null : Math.round(px);
+  try {
+    if (px === null) localStorage.removeItem(PANE_STORAGE[pane]);
+    else localStorage.setItem(PANE_STORAGE[pane], String(layout.widths[pane]));
+  } catch {
+    /* private mode: preference is session-only */
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -173,7 +248,7 @@ export function setDetailWidth(px: number) {
 
 async function getRetry<T>(url: string): Promise<T> {
   for (let attempt = 0; attempt < 120; attempt++) {
-    const res = await fetch(url);
+    const res = await fetchFresh(url);
     // 202 = the backend is reconciling: keep the last state on screen and
     // show the slim progress bar instead of silently blocking the click.
     if (res.status === 202) {
@@ -199,6 +274,7 @@ function filterParams(): Record<string, string> {
     logic_mode: filterState.logicMode,
   };
   if (filterState.hideStale) p.hide_stale = '1';
+  if (filterState.pinnedOnly) p.pinned_only = '1';
   if (filterState.versionFilter) p.version_filter = filterState.versionFilter;
   if (Object.keys(filterState.specFilters).length > 0) p.spec_filters = JSON.stringify(filterState.specFilters);
   const filters = activeFilters();
@@ -212,8 +288,75 @@ function filterParams(): Record<string, string> {
 
 const PAGE = 50;
 // Detailed pages are also capped by param rows: wide classes (100+ rows per
-// entry) would otherwise ship and lay out thousands of rows per page.
+// entry) would otherwise ship and lay out thousands of rows per page. The first
+// page only needs to fill the screen; scrolling pulls in the rest.
 const PAGE_MAX_ROWS = 1500;
+const FIRST_PAGE_MAX_ROWS = 200;
+
+function entriesUrl(classes: string[], offset: number): string {
+  const q = new URLSearchParams({
+    ...filterParams(),
+    classes: classes.join(','),
+    offset: String(offset),
+    limit: String(PAGE),
+    row_display: rowDisplay(),
+    max_rows: String(offset === 0 ? FIRST_PAGE_MAX_ROWS : PAGE_MAX_ROWS),
+  });
+  return `/api/class-entries?${q.toString()}`;
+}
+
+/** One attempt, no 202 retry: a background prefetch must never hold up a click. */
+async function getOnce<T>(url: string): Promise<T> {
+  const res = await fetchFresh(url);
+  if (res.status !== 200) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json() as Promise<T>;
+}
+
+/**
+ * Shares in-flight and finished requests by key. A click reuses a pending
+ * prefetch, and falls back to a retrying fetch if that prefetch fails.
+ */
+function shared<T>(cache: Map<string, Promise<T>>, key: string, url: string, prefetch: boolean): Promise<T> {
+  const existing = cache.get(key);
+  if (existing) return prefetch ? existing : existing.catch(() => shared(cache, key, url, false));
+  const req = prefetch ? getOnce<T>(url) : getRetry<T>(url);
+  cache.set(key, req);
+  req.catch(() => {
+    if (cache.get(key) === req) cache.delete(key);
+  });
+  return req;
+}
+
+function fetchFirstPage(classes: string[], prefetch = false): Promise<EntriesPagePayload> {
+  const url = entriesUrl(classes, 0);
+  const page = shared(firstPageCache, url, url, prefetch);
+  if (firstPageCache.size > FIRST_PAGE_CACHE_SIZE) firstPageCache.delete(firstPageCache.keys().next().value!);
+  return page;
+}
+
+function fetchDetail(recordId: string, prefetch = false): Promise<DetailPayload> {
+  const cached = detailCache.get(recordId);
+  if (cached) return Promise.resolve(cached);
+  const req = shared(detailInflight, recordId, `/api/entry/${encodeURIComponent(recordId)}`, prefetch);
+  req
+    .then((d) => {
+      detailCache.set(recordId, d);
+      detailInflight.delete(recordId);
+    })
+    .catch(() => {});
+  return req;
+}
+
+/** Hover prefetch: warm the first page and first entry a class click would load. */
+export function prefetchClass(className: string) {
+  if (selection.multiClass || !ui.ready || ui.reconciling) return;
+  fetchFirstPage([className], true)
+    .then((page) => {
+      const first = page.table_rows.find((r) => r.row_type === 'header');
+      if (first) void fetchDetail(first.record_id, true).catch(() => {});
+    })
+    .catch(() => {});
+}
 
 let classesSeq = 0;
 
@@ -242,7 +385,7 @@ export async function refreshClasses() {
 let entriesSeq = 0;
 
 async function loadEntries(offset: number, replace: boolean) {
-  if (tableState.selectedClasses.length === 0) {
+  if (tableState.selectedClasses.length === 0 && !filterState.pinnedOnly) {
     ++entriesSeq;
     tableState.rows = [];
     tableState.total = 0;
@@ -254,17 +397,10 @@ async function loadEntries(offset: number, replace: boolean) {
   const seq = ++entriesSeq;
   tableState.loading = true;
   try {
-    const q = new URLSearchParams({
-      ...filterParams(),
-      classes: tableState.selectedClasses.join(','),
-      offset: String(offset),
-      limit: String(PAGE),
-      row_display: rowDisplay(),
-      max_rows: String(PAGE_MAX_ROWS),
-    });
+    const classes = tableState.selectedClasses;
     let data: EntriesPagePayload;
     try {
-      data = await getRetry<EntriesPagePayload>(`/api/class-entries?${q.toString()}`);
+      data = await (offset === 0 ? fetchFirstPage(classes) : getRetry<EntriesPagePayload>(entriesUrl(classes, offset)));
     } catch (err) {
       console.error('entries page failed', err);
       toast('Failed to load entries');
@@ -284,6 +420,7 @@ async function loadEntries(offset: number, replace: boolean) {
 let detailSeq = 0;
 
 async function loadDetail(recordId: string) {
+  detailState.failed = false;
   const cached = detailCache.get(recordId);
   if (cached) {
     ++detailSeq;
@@ -294,20 +431,18 @@ async function loadDetail(recordId: string) {
   const seq = ++detailSeq;
   detailState.loading = true;
   try {
-    const data = await getRetry<DetailPayload>(`/api/entry/${encodeURIComponent(recordId)}`);
-    detailCache.set(recordId, data);
+    const data = await fetchDetail(recordId);
     if (seq === detailSeq && tableState.selectedEntry === recordId) detailState.current = data;
   } catch (err) {
     console.error('entry detail failed', err);
-    if (seq === detailSeq) toast('Failed to load entry');
+    if (seq === detailSeq) detailState.failed = true;
   } finally {
     if (seq === detailSeq) detailState.loading = false;
   }
 }
 
-/** Focus an entry in the table and load its detail; clicking the focused entry again clears it. */
-export async function selectEntry(recordId: string | null, opts: { toggle?: boolean } = {}) {
-  if (recordId && opts.toggle && recordId === tableState.selectedEntry) recordId = null;
+/** Focus an entry in the table and load its detail; null clears the focus. */
+export async function selectEntry(recordId: string | null) {
   if (!recordId) {
     ++detailSeq;
     tableState.selectedEntry = null;
@@ -506,6 +641,7 @@ export function forgetEntry(recordId: string) {
   }
   selection.selectedEntries = selection.selectedEntries.filter((id) => id !== recordId);
   detailCache.delete(recordId);
+  firstPageCache.clear();
 }
 
 export function toggleSelectedEntry(recordId: string) {
@@ -618,7 +754,8 @@ async function onReady() {
   ui.reimporting = false;
   ui.overlay = false;
   ui.bootstrap = [];
-  detailCache.clear();
+  clearCaches();
+  void loadPins();
   await refreshClasses();
   if (tableState.selectedClasses.length > 0) {
     const known = new Set(classesState.cards.map((c) => c.class_name));

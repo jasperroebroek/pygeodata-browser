@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import shutil
+import string
 import tarfile
 import tempfile
 import threading
@@ -27,6 +28,8 @@ from pygeodata.cache import clean_cache, clean_source_registry
 from pygeodata.catalog import store
 from pygeodata.config import FORMAT_VERSION, get_config
 from pygeodata.tracked_object import TrackedObject
+from sqlalchemy.engine import Engine
+
 from pygeodata_browser import code_service, export_service, payloads
 from pygeodata_browser.logging import configure_logging
 from pygeodata_browser.path_actions import open_path, reveal_path
@@ -36,6 +39,8 @@ from pygeodata_browser.payloads import (
     build_classes_payload,
     build_entries_page_payload,
     build_entry_detail_payload,
+    build_find_entries_payload,
+    build_pinned_entries_payload,
 )
 from pygeodata_browser.popups import (
     build_graph_popup,
@@ -92,31 +97,27 @@ def _path_allowed(path_str: str) -> bool:
     return True
 
 
-@app.get('/')
-def index():
-    return render_template('index.html')
-
-
 _APP_DIST = Path(__file__).parent / 'static' / 'app'
 
 
-@app.get('/app')
-def svelte_redirect():
-    return redirect('./app/', code=302)
-
-
-@app.get('/app/')
-def svelte_index():
-    """The built Svelte frontend; run `npm run build` in app/ if missing."""
-    index = _APP_DIST / 'index.html'
-    if not index.exists():
-        abort(404, 'Svelte app not built: run npm run build in the app/ directory')
+@app.get('/')
+def index() -> Response:
+    """The built frontend (``app/`` is its source; release builds ship it prebuilt)."""
+    if not (_APP_DIST / 'index.html').exists():
+        abort(404, 'Frontend not built: run `npm run build` in the app/ directory')
     return send_from_directory(_APP_DIST, 'index.html')
 
 
-@app.get('/app/<path:filename>')
-def svelte_asset(filename: str):
-    return send_from_directory(_APP_DIST, filename)
+@app.get('/assets/<path:filename>')
+def app_asset(filename: str) -> Response:
+    return send_from_directory(_APP_DIST / 'assets', filename)
+
+
+@app.get('/app')
+@app.get('/app/')
+def app_redirect() -> Response:
+    """The frontend used to live under /app/; keep old links working."""
+    return redirect('/', code=301)
 
 
 @app.get('/api/bootstrap')
@@ -279,6 +280,11 @@ def api_class_entries():
         return _loading()
     classes = [c for c in request.args.get('classes', '').split(',') if c]
     ids_only = request.args.get('ids_only') == '1'
+    only_ids = None
+    if request.args.get('pinned_only') == '1':
+        pinned = build_pinned_entries_payload(_ctx.state, store.pinned_hashes(_catalog_engine()))
+        only_ids = {p['record_id'] for p in pinned}
+        classes = classes or sorted({p['class_name'] for p in pinned})
     if not classes and not ids_only:
         return jsonify({'table_rows': [], 'total': 0, 'offset': 0, 'limit': 0})
     return jsonify(
@@ -297,8 +303,57 @@ def api_class_entries():
             selected_entry=request.args.get('selected_entry') or None,
             ids_only=ids_only,
             max_rows=request.args.get('max_rows', type=int),
+            only_ids=only_ids,
         ),
     )
+
+
+_MIN_HASH_PREFIX = 4
+
+
+@app.get('/api/find-entries')
+def api_find_entries() -> Response | tuple[dict, int]:
+    """Quick-switcher lookup by id (state hash) prefix; short or non-hex queries match nothing."""
+    if _ctx.is_loading() or _ctx.state is None:
+        return _loading()
+    q = request.args.get('q', '').strip().lower()
+    if len(q) < _MIN_HASH_PREFIX or not set(q) <= set(string.hexdigits.lower()):
+        return jsonify({'entries': []})
+    return jsonify({'entries': build_find_entries_payload(_ctx.state, q)})
+
+
+def _catalog_engine() -> Engine:
+    return store.get_engine(str(get_config().path_registry.resolve()), FORMAT_VERSION)
+
+
+def _pins_response() -> Response:
+    pins = store.pinned_hashes(_catalog_engine())
+    return jsonify({'pins': build_pinned_entries_payload(_ctx.state, pins)})
+
+
+@app.get('/api/pins')
+def api_pins() -> Response | tuple[dict, int]:
+    if _ctx.is_loading() or _ctx.state is None:
+        return _loading()
+    return _pins_response()
+
+
+@app.put('/api/pins/<record_id>')
+def api_pin(record_id: str) -> Response | tuple[dict, int]:
+    if _ctx.is_loading() or _ctx.state is None:
+        return _loading()
+    if record_id not in _ctx.state.entries:
+        abort(404)
+    store.set_pinned(_catalog_engine(), record_id, pinned=True)
+    return _pins_response()
+
+
+@app.delete('/api/pins/<record_id>')
+def api_unpin(record_id: str) -> Response | tuple[dict, int]:
+    if _ctx.is_loading() or _ctx.state is None:
+        return _loading()
+    store.set_pinned(_catalog_engine(), record_id, pinned=False)
+    return _pins_response()
 
 
 @app.get('/api/entry/<record_id>')

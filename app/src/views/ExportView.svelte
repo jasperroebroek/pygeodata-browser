@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ReloadBar from '../components/ReloadBar.svelte';
   import type { TableRow } from '../lib/api';
   import { exportApi } from '../lib/apiExport';
   import { singleEntryUrl, triggerDownload } from '../lib/format';
@@ -85,6 +86,7 @@
 </script>
 
 <div class="view-export">
+  <ReloadBar />
   <div class="export-card">
     <div class="export-card-hd">
       <span class="export-card-title">Export</span>

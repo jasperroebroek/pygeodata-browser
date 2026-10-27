@@ -18,3 +18,10 @@ export function isRasterFile(path: string): boolean {
   const i = path.lastIndexOf('.');
   return i !== -1 && RASTER_EXTS.has(path.slice(i).toLowerCase());
 }
+
+export type FileTone = 'data' | 'table' | 'figure' | 'neutral';
+
+const FILE_TONES: Record<string, FileTone> = { raster: 'data', table: 'table', image: 'figure', pdf: 'figure' };
+
+/** Colour family for a file-kind pill (kinds come from pygeodata's classify_file). */
+export const fileTone = (kind: string): FileTone => FILE_TONES[kind] ?? 'neutral';

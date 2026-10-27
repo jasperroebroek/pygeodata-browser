@@ -6,7 +6,6 @@
     navigateForward,
     selectAdjacentEntry,
     selection,
-    setDetailWidth,
     ui,
   } from './lib/stores.svelte';
   import { toasts } from './lib/toast.svelte';
@@ -15,16 +14,14 @@
   import MainPane from './components/MainPane.svelte';
   import DetailPane from './components/DetailPane.svelte';
   import Modal from './components/Modal.svelte';
+  import QuickSwitcher from './components/QuickSwitcher.svelte';
+  import ReloadBar from './components/ReloadBar.svelte';
+  import { palette } from './lib/palette.svelte';
+  import Resizer from './components/Resizer.svelte';
   import CodeView from './views/CodeView.svelte';
   import ExportView from './views/ExportView.svelte';
 
   init();
-
-  const progressPct = $derived.by(() => {
-    const p = ui.progress;
-    const total = (p.reimport_total ?? 0) + (p.total ?? 0);
-    return total ? Math.round((((p.reimport_done ?? 0) + (p.done ?? 0)) / total) * 100) : 0;
-  });
 
   const overlayText = $derived.by(() => {
     const p = ui.progress;
@@ -47,6 +44,11 @@
 
   function onKeydown(e: KeyboardEvent) {
     const target = e.target as HTMLElement;
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      palette.open = !palette.open;
+      return;
+    }
     if (e.metaKey && e.key === '[') {
       e.preventDefault();
       void navigateBack();
@@ -58,49 +60,22 @@
       return;
     }
     if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return;
+    if (e.key === '/' && ui.view === 'entries') {
+      const filter = document.querySelector<HTMLInputElement>('.class-filter');
+      if (filter) {
+        e.preventDefault();
+        filter.focus();
+        filter.select();
+      }
+      return;
+    }
     if (ui.view !== 'entries' || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
     e.preventDefault();
     void selectAdjacentEntry(e.key === 'ArrowDown' ? 1 : -1);
   }
-
-  // ------------------------------------------------------------------ detail pane resize
-
-  let detailEl: HTMLElement | undefined = $state();
-  let dragging = $state(false);
-  let startX = 0;
-  let startW = 0;
-  let dragW = $state<number | null>(null);
-
-  function startResize(e: MouseEvent) {
-    if (!detailEl) return;
-    e.preventDefault();
-    startX = e.clientX;
-    startW = detailEl.getBoundingClientRect().width;
-    dragging = true;
-  }
-
-  function onMouseMove(e: MouseEvent) {
-    if (!dragging) return;
-    // Drag left = wider.
-    dragW = Math.max(200, Math.min(window.innerWidth * 0.8, startW + startX - e.clientX));
-  }
-
-  function onMouseUp() {
-    if (!dragging) return;
-    dragging = false;
-    if (dragW !== null) setDetailWidth(dragW);
-    dragW = null;
-  }
-
-  const detailWidth = $derived(dragW ?? layout.detailWidth);
-
-  $effect(() => {
-    document.body.style.cursor = dragging ? 'col-resize' : '';
-    document.body.style.userSelect = dragging ? 'none' : '';
-  });
 </script>
 
-<svelte:window onkeydown={onKeydown} onmousemove={onMouseMove} onmouseup={onMouseUp} />
+<svelte:window onkeydown={onKeydown} />
 
 <TopBar />
 
@@ -113,16 +88,9 @@
     >
       <Sidebar />
       <MainPane />
-      <!-- svelte-ignore a11y_no_noninteractive_element_interactions (mouse-only drag handle) -->
-      <div
-        class="resize-handle"
-        class:dragging
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize detail pane"
-        onmousedown={startResize}
-      ></div>
-      <aside class="detail-pane" bind:this={detailEl} style:flex={detailWidth ? `0 0 ${detailWidth}px` : null}>
+      <aside class="detail-pane" style:flex={layout.widths.detail ? `0 0 ${layout.widths.detail}px` : null}>
+        <Resizer pane="detail" edge="left" min={280} max={() => window.innerWidth * 0.8} />
+        <ReloadBar />
         <DetailPane />
       </aside>
     </div>
@@ -135,13 +103,7 @@
 
 <Modal />
 
-{#if (ui.loading && ui.statusKnown && !ui.overlay) || ui.reconciling}
-  <div class="fast-progress" title={ui.reimporting ? 'Reimporting Python files…' : 'Loading entries…'}>
-    <div class="loading-bar-track fast-progress-track">
-      <div class="loading-bar-fill" style:width="{ui.reconciling && !ui.loading ? 100 : progressPct}%"></div>
-    </div>
-  </div>
-{/if}
+{#if palette.open}<QuickSwitcher />{/if}
 
 {#if ui.loading && ui.overlay}
   <div class="loading-overlay">

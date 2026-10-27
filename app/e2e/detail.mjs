@@ -7,7 +7,11 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
 const out = [];
-const check = (n, ok, i = '') => out.push(`${ok ? 'PASS' : 'FAIL'}  ${n}${i ? '  — ' + i : ''}`);
+const check = (n, ok, i = '') => {
+  const line = `${ok ? 'PASS' : 'FAIL'}  ${n}${i ? '  — ' + i : ''}`;
+  out.push(line);
+  console.log(line);
+};
 const S = (n) => page.screenshot({ path: new URL(`./shots/D-${n}.png`, import.meta.url).pathname });
 await page.goto('http://localhost:5173/', { waitUntil: 'networkidle' });
 const count = (s) => page.locator(s).count();
@@ -41,7 +45,7 @@ if (await count('.js-bounds-map')) {
   check('Bounds map modal', (await count('.modal-content iframe')) === 1); await close();
 }
 // Table entry
-const tableCls = await page.locator('.class-card:has(.badge-type-table)').first().getAttribute('title');
+const tableCls = await page.locator('.class-card:has(.kind-icon--table)').first().getAttribute('title');
 await page.click(`.class-card[title="${tableCls}"]`); await wait(2000);
 check('Table preview renders', (await count('.tbl-preview table')) > 0, tableCls);
 await S('table');
@@ -72,7 +76,7 @@ check('Full expand renders more rows', (await count('.diff-table tr')) > 30);
 await S('diff');
 await page.click('.kind-tab:text-is("Inline")'); await page.click('.kind-tab:text-is("Hunks")');
 // Diagnostics
-await page.click('.btn-diag'); await wait(400);
+await page.click('button[title="Registry diagnostics"]'); await wait(400);
 check('Diagnostics modal', (await count('.diag-table .diag-val')) >= 5); await S('diag'); await close();
 // Clean cache dry run
 await page.click('button[title=Menu]');
@@ -82,6 +86,5 @@ if (!disabled) {
   check('Clean cache dry-run preview', (await page.locator('.clean-cache-output').innerText()).length > 0);
   await S('clean'); await close();
 } else { check('Clean cache enabled (live classes)', false); await page.keyboard.press('Escape'); }
-console.log(out.join('\n'));
 if (errors.length) console.log('errors:\n' + errors.join('\n'));
 await browser.close();

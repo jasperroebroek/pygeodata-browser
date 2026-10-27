@@ -1,0 +1,64 @@
+# Push a version tag (e.g. `git tag v0.1.0 && git push --tags`) to publish to PyPI.
+# The frontend is compiled here and shipped prebuilt; users never need Node.
+# PyPI authenticates this workflow via trusted publishing (no API token): add it
+# as a trusted publisher on PyPI (workflow `release.yml`, environment `pypi`).
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Build the frontend
+        working-directory: app
+        run: |
+          npm ci
+          npm run check
+          npm run build
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check the tag matches the package version
+        run: |
+          version=$(python -c "import ast, pathlib; t = ast.parse(pathlib.Path('api/__init__.py').read_text()); print(next(n.value.value for n in t.body if isinstance(n, ast.Assign) and n.targets[0].id == '__version__'))")
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME does not match __version__ $version"; exit 1; }
+
+      - name: Build distributions
+        run: |
+          python -m pip install build
+          python -m build
+
+      - name: Check the distributions ship the built frontend
+        run: python scripts/check_dist.py dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1

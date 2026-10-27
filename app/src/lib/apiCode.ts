@@ -1,5 +1,7 @@
 // Client for the /api/code/* endpoints (api/web.py). Owned by the code-view milestone.
 
+import { fetchFresh } from './api';
+
 export interface CodeVersion {
   version_id: string;
   mtime: string;
@@ -84,7 +86,7 @@ export function isLoading(r: VersionsResponse): r is LoadingPayload {
 }
 
 async function request(url: string): Promise<{ ok: boolean; status: number; data: unknown }> {
-  const res = await fetch(url);
+  const res = await fetchFresh(url);
   let data: unknown = null;
   try {
     data = await res.json();

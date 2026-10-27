@@ -8,13 +8,32 @@
     toggleSelectedEntry,
   } from '../lib/stores.svelte';
   import { singleEntryUrl, triggerDownload } from '../lib/format';
+  import Download from '@lucide/svelte/icons/download';
+  import type { TableRow } from '../lib/api';
   import EntryRows from './EntryRows.svelte';
-  import TypeBadge from './TypeBadge.svelte';
+  import KindIcon from './KindIcon.svelte';
+  import PinToggle from './PinToggle.svelte';
 
   let scrollEl: HTMLElement | undefined = $state();
 
   const headers = $derived(tableState.rows.filter((r) => r.row_type === 'header'));
   const cart = $derived(new Set(selection.selectedEntries));
+
+  /** Contiguous runs of one class share a label instead of repeating it per row. */
+  const groups = $derived.by(() => {
+    const out: { className: string; rows: TableRow[] }[] = [];
+    for (const r of headers) {
+      const last = out[out.length - 1];
+      if (last && last.className === r.class_name) last.rows.push(r);
+      else out.push({ className: r.class_name, rows: [r] });
+    }
+    return out;
+  });
+
+  function specParts(row: TableRow): string[] {
+    const s = row.spec;
+    return s ? ([s.crs, s.resolution_display, s.shape, s.bounds_display].filter(Boolean) as string[]) : [];
+  }
   const inCart = (id: string) => cart.has(id);
   const download = (id: string) => triggerDownload(singleEntryUrl(id));
 
@@ -64,53 +83,62 @@
       {#if headers.length === 0}
         <div class="detail-empty">{emptyText}</div>
       {/if}
-      {#each headers as r (r.record_id)}
-        {@const inC = cart.has(r.record_id)}
-        <div
-          class="entry-pill"
-          class:active={r.record_id === tableState.selectedEntry}
-          class:selected-for-export={inC}
-          data-entry={r.record_id}
-          role="button"
-          tabindex="-1"
-          onclick={() => void selectEntry(r.record_id, { toggle: true })}
-          onkeydown={(e) => e.key === 'Enter' && void selectEntry(r.record_id, { toggle: true })}
-        >
-          <button
-            class="select-icon"
-            class:select-icon--in={inC}
-            title={inC ? 'Remove from export' : 'Add to export'}
-            aria-label={inC ? 'Remove from export' : 'Add to export'}
-            onclick={(e) => {
-              e.stopPropagation();
-              toggleSelectedEntry(r.record_id);
-            }}
-          ></button>
-          <button
-            class="dl-icon"
-            title="Download this entry"
-            aria-label="Download this entry"
-            onclick={(e) => {
-              e.stopPropagation();
-              download(r.record_id);
-            }}
-          ></button>
-          <span class="entry-pill-name"
-            >{r.class_name}{#if r.format_version_stale}<span
-                class="status-dot status-dot--version"
-                title="pygeodata version changed — entry must be regenerated"
-              ></span>{:else if r.dep_hash_stale}<span
-                class="status-dot status-dot--source"
-                title="Dependencies changed — entry may be outdated"
-              ></span>{/if}</span
-          >
-          <span class="entry-pill-right">
-            <span class="entry-pill-hash">{r.record_id.slice(0, 6)}</span>
-            <TypeBadge type={r.object_type} />
-            {#if r.warning_count}<span class="pill-flag pill-flag--warn">{r.warning_count}⚠</span>{/if}
-            {#if r.error}<span class="pill-flag pill-flag--err">!</span>{/if}
-          </span>
+      {#each groups as g, gi (gi)}
+        <div class="entry-group-hd">
+          <KindIcon type={g.rows[0].object_type} size={13} />
+          <span class="entry-group-name">{g.className}</span>
         </div>
+        {#each g.rows as r (r.record_id)}
+          {@const inC = cart.has(r.record_id)}
+          <div
+            class="entry-pill"
+            class:active={r.record_id === tableState.selectedEntry}
+            class:selected-for-export={inC}
+            data-entry={r.record_id}
+            role="button"
+            tabindex="-1"
+            onclick={() => void selectEntry(r.record_id)}
+            onkeydown={(e) => e.key === 'Enter' && void selectEntry(r.record_id)}
+          >
+            <button
+              class="select-icon"
+              class:select-icon--in={inC}
+              role="checkbox"
+              aria-checked={inC}
+              title={inC ? 'Remove from export' : 'Add to export'}
+              aria-label={inC ? 'Remove from export' : 'Add to export'}
+              onclick={(e) => {
+                e.stopPropagation();
+                toggleSelectedEntry(r.record_id);
+              }}
+            ></button>
+            <span class="entry-pill-hash" title={r.record_id}>{r.record_id.slice(0, 8)}</span>
+            {#if r.format_version_stale}
+              <span class="pill-flag pill-flag--err" title="pygeodata version changed — entry must be regenerated">version</span>
+            {:else if r.dep_hash_stale}
+              <span class="pill-flag pill-flag--warn" title="Dependencies changed — entry may be outdated">stale</span>
+            {/if}
+            {#if r.warning_count}<span class="pill-flag pill-flag--warn" title={r.warnings?.join('\n')}>{r.warning_count}⚠</span>{/if}
+            {#if r.error}<span class="pill-flag pill-flag--err" title={r.error}>!</span>{/if}
+            <span class="entry-pill-spec">
+              {#each specParts(r) as part, j (j)}<span class="tbl-spec-pill">{part}</span>{/each}
+            </span>
+            <span class="entry-actions">
+              <PinToggle entry={r} />
+              <button
+                class="icon-btn icon-btn--xs entry-dl"
+                title="Download this entry"
+                aria-label="Download this entry"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  download(r.record_id);
+                }}
+              >
+                <Download size={13} />
+              </button>
+            </span>
+          </div>
+        {/each}
       {/each}
     </div>
   {:else}
@@ -139,7 +167,7 @@
             rows={tableState.rows}
             activeId={tableState.selectedEntry}
             {inCart}
-            onSelect={(id) => void selectEntry(id, { toggle: true })}
+            onSelect={(id) => void selectEntry(id)}
             onToggleCart={toggleSelectedEntry}
             onDownload={download}
           />

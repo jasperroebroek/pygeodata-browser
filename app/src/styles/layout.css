@@ -51,23 +51,11 @@ tr.row-entry {
   color: var(--faint);
 }
 
-/* Extra breathing room before the icon buttons */
-.btn-diag { margin-left: 24px; }
-
-/* Topbar icon buttons (ⓘ, ⋮) */
-.topbar-icon-btn {
-  font-size: 20px !important;
-  font-weight: 900;
-  padding: 4px;
-  line-height: 1;
-  border: none !important;
-  border-radius: 6px;
-  color: var(--muted);
-}
-.topbar-icon-btn:hover {
-  background: var(--border);
-  color: var(--text);
-  border-color: transparent;
+.topbar-icons {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 14px;
 }
 
 /* Three-dot dropdown menu */
@@ -200,22 +188,10 @@ tr.row-entry {
   max-width: 80vw;
 }
 
-.resize-handle {
-  flex: 0 0 5px;
-  cursor: col-resize;
-  background: var(--border);
-  transition: background 0.15s;
-  z-index: 10;
-}
-
-.resize-handle:hover,
-.resize-handle.dragging {
-  background: var(--accent);
-}
-
 .sidebar,
 .main-pane,
 .detail-pane {
+  position: relative;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -224,7 +200,7 @@ tr.row-entry {
 
 .sidebar {
   border-right: 1px solid var(--border);
-  background: var(--surface);
+  background: var(--s2);
   position: relative;
 }
 
@@ -234,29 +210,14 @@ tr.row-entry {
 
 .sidebar-collapse-btn {
   position: absolute;
-  top: 6px;
+  top: 4px;
   right: 6px;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
   z-index: 5;
 }
 
-.sidebar-collapse-btn:hover {
-  background: var(--border);
-  color: var(--text);
-}
-
 .app-layout .sidebar.collapsed {
-  flex: 0 0 32px;
-  min-width: 32px;
+  flex: 0 0 44px;
+  min-width: 44px;
 }
 
 .sidebar.collapsed > *:not(.sidebar-collapse-btn) {
@@ -345,4 +306,73 @@ tr.row-entry {
   font-size: 12px;
   color: var(--faint);
   padding: 8px 2px;
+}
+
+.topbar .kind-tab {
+  font-size: 12px;
+  padding: 5px 12px;
+}
+
+.topbar .kind-tab--icon {
+  padding: 4px 10px;
+}
+
+
+.search-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  margin-right: 8px;
+  padding: 0 6px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--s2);
+  color: var(--faint);
+  font-size: 12px;
+  cursor: pointer;
+  transition: .12s;
+}
+
+.search-btn:hover {
+  border-color: var(--accent-mid);
+  color: var(--muted);
+}
+
+.search-btn kbd {
+  font: inherit;
+  font-size: 10px;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 5px;
+}
+
+.kind-tab--pinned {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.kind-tab--pinned .tab-badge {
+  margin-left: 0;
+}
+
+/* Active tabs are bold: an invisible bold copy of the label reserves that width,
+   so switching tabs never shifts the bar. */
+.tab-label {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.tab-label::after {
+  content: attr(data-label);
+  font-weight: 600;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+  user-select: none;
 }

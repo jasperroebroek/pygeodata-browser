@@ -24,16 +24,20 @@
     depth = 0,
     filterHidden = true,
     knownClasses = null,
+    open = false,
     onClass,
   }: {
     data: unknown;
     depth?: number;
     filterHidden?: boolean;
     knownClasses?: Set<string> | null;
+    /** Initial state of every node; re-key the root to apply a new value. */
+    open?: boolean;
     onClass: (cls: string) => void;
   } = $props();
 
-  let collapsed = $state<Record<string, boolean>>({});
+  let expanded = $state<Record<string, boolean>>({});
+  const isOpen = (key: string) => expanded[key] ?? open;
 
   const entries = $derived.by((): [string, unknown][] => {
     if (Array.isArray(data)) return data.map((v, i) => [String(i), v]);
@@ -75,9 +79,9 @@
   {#if hasChildren}
     <button
       class="jx-toggle"
-      class:jx-open={!collapsed[key]}
-      aria-label={collapsed[key] ? 'expand' : 'collapse'}
-      onclick={() => (collapsed[key] = !collapsed[key])}
+      class:jx-open={isOpen(key)}
+      aria-label={isOpen(key) ? 'collapse' : 'expand'}
+      onclick={() => (expanded[key] = !isOpen(key))}
     ></button>
   {:else}
     <span class="jx-leaf-dot"></span>
@@ -96,8 +100,8 @@
           <span class="jx-sep">→</span>
           <a href="#top" class="jx-cls" onclick={(e) => link(e, String(value.class_name))}>{value.class_name}</a>
         </span>
-        {#if has && !collapsed[key]}
-          <JsonExplorer data={inner} depth={depth + 1} {filterHidden} {knownClasses} {onClass} />
+        {#if has && isOpen(key)}
+          <JsonExplorer data={inner} depth={depth + 1} {filterHidden} {knownClasses} {open} {onClass} />
         {/if}
       {:else if Array.isArray(value)}
         <span class="jx-row">
@@ -105,8 +109,8 @@
           {@render keyEl(key)}
           <span class="jx-dim">[{value.length}]</span>
         </span>
-        {#if value.length && !collapsed[key]}
-          <JsonExplorer data={value} depth={depth + 1} {filterHidden} {knownClasses} {onClass} />
+        {#if value.length && isOpen(key)}
+          <JsonExplorer data={value} depth={depth + 1} {filterHidden} {knownClasses} {open} {onClass} />
         {/if}
       {:else if isObj(value)}
         {@const cn = value.class_name ? String(value.class_name) : null}
@@ -122,8 +126,8 @@
             <a href="#top" class="jx-cls" onclick={(e) => link(e, cn)}>{cn}</a>
           {/if}
         </span>
-        {#if keys.length && !collapsed[key]}
-          <JsonExplorer data={pick(value, keys)} depth={depth + 1} {filterHidden} {knownClasses} {onClass} />
+        {#if keys.length && isOpen(key)}
+          <JsonExplorer data={pick(value, keys)} depth={depth + 1} {filterHidden} {knownClasses} {open} {onClass} />
         {/if}
       {:else}
         <span class="jx-row">

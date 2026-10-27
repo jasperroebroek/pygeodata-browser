@@ -7,4 +7,4 @@ build/
 dist/
 .DS_Store
 app/node_modules/
-app/dist/
+api/static/app/

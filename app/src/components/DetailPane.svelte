@@ -1,8 +1,11 @@
 <script lang="ts">
-  import { api } from '../lib/api';
+  import ChevronsDownUp from '@lucide/svelte/icons/chevrons-down-up';
+  import Pin from '@lucide/svelte/icons/pin';
+  import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down';
+  import { api, fetchFresh } from '../lib/api';
   import type { EntryDetail, FilePayload, SpecPayload } from '../lib/api';
   import { copyText, openFilePopup, openGraphPopup, openPath, revealPath } from '../lib/actions';
-  import { isRasterFile } from '../lib/format';
+  import { fileTone, isRasterFile } from '../lib/format';
   import { openModal } from '../lib/modal.svelte';
   import { navigateToCodeClass, showWhatChanged } from '../lib/nav.svelte';
   import {
@@ -10,12 +13,15 @@
     detailState,
     followServerReload,
     forgetEntry,
+    isPinned,
     openEntry,
     selectEntry,
+    setPinned,
     tableState,
   } from '../lib/stores.svelte';
   import { toast } from '../lib/toast.svelte';
   import { zoomable } from '../lib/zoom';
+  import AssociatedEntries from './AssociatedEntries.svelte';
   import JsonExplorer, { HIDDEN_JSON_KEYS } from './JsonExplorer.svelte';
   import TypeBadge from './TypeBadge.svelte';
 
@@ -24,8 +30,18 @@
   const depHash = $derived(entry?.dep_hash ?? null);
   const knownClasses = $derived(new Set(classesState.cards.map((c) => c.class_name)));
 
-  let paramsOpen = $state(false);
+  let paramsExpanded = $state({ open: false, seq: 0 });
+
+  function setParamsExpanded(open: boolean) {
+    paramsExpanded = { open, seq: paramsExpanded.seq + 1 };
+  }
   let coShowAll = $state(false);
+
+  const entryPinned = $derived(!!entry && isPinned(entry.record_id));
+
+  const hasSpec = $derived(
+    !!entry && !!(entry.spec.crs || entry.spec.resolution_display || entry.spec.shape || entry.spec.bounds_display),
+  );
 
   const hasVisibleParams = $derived(
     !!entry?.params_tree && Object.keys(entry.params_tree).some((k) => !HIDDEN_JSON_KEYS.has(k)),
@@ -74,7 +90,7 @@
     tableError = false;
     if (!path) return;
     let cancelled = false;
-    fetch(api.fileUrl(path))
+    fetchFresh(api.fileUrl(path))
       .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
       .then((html) => !cancelled && (tableHtml = html))
       .catch(() => !cancelled && (tableError = true));
@@ -103,8 +119,13 @@
   <button class="act-btn" onclick={() => copyText(f.path)}>Copy path</button>
 {/snippet}
 
+{#snippet fileType(f: FilePayload)}
+  <span class="file-type file-type--{fileTone(f.kind)}">{f.kind}</span>
+{/snippet}
+
 {#snippet fileRow(f: FilePayload)}
   <div class="entry-file-row" style="margin-top:4px">
+    {@render fileType(f)}
     <span class="entry-file-name">{f.label}</span>
     {@render fileActions(f)}
   </div>
@@ -279,61 +300,77 @@
             </button>
             {@render hdSep()}
           {/if}
+          <button
+            class="icon-btn icon-btn--sm pin-btn"
+            class:active={entryPinned}
+            title={entryPinned ? 'Unpin this entry' : 'Pin this entry (kept in the sidebar’s Pinned section)'}
+            aria-label={entryPinned ? 'Unpin' : 'Pin'}
+            aria-pressed={entryPinned}
+            onclick={() =>
+              void setPinned({ record_id: e.record_id, class_name: e.class_name, object_type: e.object_type }, !entryPinned)}
+          >
+            <Pin size={14} fill={entryPinned ? 'currentColor' : 'none'} />
+          </button>
+          {@render hdSep()}
           <button class="act-btn act-btn--danger" title="Delete this cache entry from disk" onclick={() => deleteEntry(e)}>
             Delete
           </button>
         </div>
       </div>
-      <div class="dcard-body dcard-body--entry">
-        <div class="spec-kv-table">
-          {#if e.spec.crs}
-            <div class="spec-kv-row">
-              <span class="spec-kv-label">CRS</span>
-              <span class="spec-kv-val">
-                {#if crsUrl}<a class="spec-cell-link" href={crsUrl} target="_blank" rel="noopener">{e.spec.crs}</a>
-                {:else}<span class="kv-val">{e.spec.crs}</span>{/if}
-              </span>
-            </div>
-          {/if}
-          {#if e.spec.resolution_display}
-            <div class="spec-kv-row">
-              <span class="spec-kv-label">Resolution</span>
-              <span class="spec-kv-val"><span class="kv-val">{e.spec.resolution_display}</span></span>
-            </div>
-          {/if}
-          {#if e.spec.shape}
-            <div class="spec-kv-row">
-              <span class="spec-kv-label">Shape</span>
-              <span class="spec-kv-val"><span class="kv-val">{e.spec.shape}</span></span>
-            </div>
-          {/if}
-          {#if e.spec.bounds_display}
-            {@const bl = e.spec.bounds_latlon}
-            <div class="spec-kv-row">
-              <span class="spec-kv-label">Bounds</span>
-              <span class="spec-kv-val">
-                {#if bl}
-                  <button
-                    class="act-btn js-bounds-map"
-                    onclick={() => openModal(`Bounds — ${e.spec.crs ?? ''}`, { kind: 'iframe', src: api.boundsMapUrl(bl, e.spec.crs ?? '') })}
-                  >
-                    {e.spec.bounds_display}
-                  </button>
-                {:else}
-                  <span class="kv-val">{e.spec.bounds_display}</span>
-                {/if}
-              </span>
-            </div>
-          {/if}
-        </div>
+      <div class="dcard-body dcard-body--entry" class:has-spec={hasSpec}>
+        {#if hasSpec}
+          <div class="spec-kv-table">
+            {#if e.spec.crs}
+              <div class="spec-kv-row">
+                <span class="spec-kv-label">CRS</span>
+                <span class="spec-kv-val">
+                  {#if crsUrl}<a class="spec-cell-link" href={crsUrl} target="_blank" rel="noopener">{e.spec.crs}</a>
+                  {:else}<span class="kv-val">{e.spec.crs}</span>{/if}
+                </span>
+              </div>
+            {/if}
+            {#if e.spec.resolution_display}
+              <div class="spec-kv-row">
+                <span class="spec-kv-label">Resolution</span>
+                <span class="spec-kv-val"><span class="kv-val">{e.spec.resolution_display}</span></span>
+              </div>
+            {/if}
+            {#if e.spec.shape}
+              <div class="spec-kv-row">
+                <span class="spec-kv-label">Shape</span>
+                <span class="spec-kv-val"><span class="kv-val">{e.spec.shape}</span></span>
+              </div>
+            {/if}
+            {#if e.spec.bounds_display}
+              {@const bl = e.spec.bounds_latlon}
+              <div class="spec-kv-row">
+                <span class="spec-kv-label">Bounds</span>
+                <span class="spec-kv-val">
+                  {#if bl}
+                    <button
+                      class="act-btn js-bounds-map"
+                      onclick={() => openModal(`Bounds — ${e.spec.crs ?? ''}`, { kind: 'iframe', src: api.boundsMapUrl(bl, e.spec.crs ?? '') })}
+                    >
+                      {e.spec.bounds_display}
+                    </button>
+                  {:else}
+                    <span class="kv-val">{e.spec.bounds_display}</span>
+                  {/if}
+                </span>
+              </div>
+            {/if}
+          </div>
+        {/if}
         {#if e.primary_file}
-          <div class="dcard-sep"></div>
+          {#if hasSpec}<div class="dcard-sep"></div>{/if}
           <div class="entry-file-row">
+            {@render fileType(e.primary_file)}
             <span class="entry-file-name" class:entry-file-name--primary={e.sidecar_files.length > 0}>{e.primary_file.label}</span>
             {@render fileActions(e.primary_file)}
           </div>
           {#each e.sidecar_files as f (f.path)}
             <div class="entry-file-row entry-file-row--sidecar">
+              {@render fileType(f)}
               <span class="entry-file-name">{f.label}</span>
               {@render fileActions(f)}
             </div>
@@ -406,32 +443,16 @@
 
     {#if e.linked_entries.length}
       <div class="dcard">
-        <div class="dcard-hd"><span class="dcard-hd-label">Associated entries</span></div>
-        <div class="dcard-body dcard-body--links">
-          {#each e.linked_entries as l, i (i)}
-            {@const lines = Object.entries(l.params_summary ?? {})}
-            <div class="link-row">
-              <div class="link-row-top">
-                <span class="link-param-name">{l.param_name || '—'}</span>
-                {#if l.state_hash}
-                  {@render entryLink(l.state_hash, l.class_name)}
-                {:else}
-                  <span class="link-entry-name">{l.class_name}</span>
-                {/if}
-                <span class="link-hash" title={l.state_hash ?? ''}>{l.state_hash ? l.state_hash.slice(0, 6) : '—'}</span>
-              </div>
-              {#if lines.length}
-                <div class="link-params">
-                  {#each lines as [k, v] (k)}
-                    <div class="link-param-line">
-                      <span class="link-param-key">{k}</span>
-                      <span class="link-param-val">{v}</span>
-                    </div>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          {/each}
+        <div class="dcard-hd">
+          <span class="dcard-hd-label">Associated entries</span><span class="dcard-hd-meta">{e.linked_entries.length}</span>
+        </div>
+        <div class="dcard-body">
+          <AssociatedEntries
+            entries={e.linked_entries}
+            {knownClasses}
+            onEntry={(hash, cls) => void openEntry(hash, cls)}
+            onClass={toCode}
+          />
         </div>
       </div>
     {/if}
@@ -465,16 +486,23 @@
     {/if}
 
     {#if hasVisibleParams}
-      <div class="dcard">
-        <button class="dcard-hd dcard-hd--toggle" class:open={paramsOpen} onclick={() => (paramsOpen = !paramsOpen)}>
-          <span class="dcard-hd-label">Parameters</span>
-          <span class="dcard-hd-chevron">▾</span>
-        </button>
-        {#if paramsOpen}
-          <div class="dcard-body dcard-body--params">
-            <JsonExplorer data={e.params_tree} {knownClasses} onClass={toCode} />
+      <div class="dcard dcard--params">
+        <div class="dcard-hd">
+          <div class="dcard-hd-top"><span class="dcard-hd-label">Parameters</span></div>
+          <div class="dcard-hd-actions">
+            <button class="icon-btn icon-btn--sm" title="Expand all" onclick={() => setParamsExpanded(true)}>
+              <ChevronsUpDown size={15} />
+            </button>
+            <button class="icon-btn icon-btn--sm" title="Collapse all" onclick={() => setParamsExpanded(false)}>
+              <ChevronsDownUp size={15} />
+            </button>
           </div>
-        {/if}
+        </div>
+        <div class="dcard-body dcard-body--params">
+          {#key `${e.record_id}:${paramsExpanded.seq}`}
+            <JsonExplorer data={e.params_tree} {knownClasses} open={paramsExpanded.open} onClass={toCode} />
+          {/key}
+        </div>
       </div>
     {/if}
   {:else if tableState.selectedClasses.length > 1 && !detailState.loading}
@@ -484,6 +512,12 @@
         {#each tableState.selectedClasses as cn (cn)}<span class="badge badge-neutral">{cn}</span>{/each}
       </div>
       <span style="color:var(--faint);font-size:11px">Select an entry to view details.</span>
+    </div>
+  {:else if detailState.failed && tableState.selectedEntry}
+    {@const rid = tableState.selectedEntry}
+    <div class="detail-empty detail-failed">
+      Couldn’t load this entry.
+      <button class="act-btn" onclick={() => void selectEntry(rid)}>Retry</button>
     </div>
   {:else if !detailState.loading}
     <div class="detail-empty">Select an entry to view details.</div>

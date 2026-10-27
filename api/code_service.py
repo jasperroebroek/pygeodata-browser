@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from difflib import SequenceMatcher, unified_diff
 
+from pygeodata.ast import get_source_code
 from pygeodata.catalog.types import CodeClassState
 from pygeodata.hash import calculate_cls_source_hash
 from pygeodata.paths import CodeRegistryPathConstructor
@@ -155,17 +156,38 @@ def version_classes(version_id: str, vreg: VersionRegistry) -> list[CodeClassSta
     return result
 
 
+def _source_text(source_hash: str, vreg: VersionRegistry) -> tuple[str, str | None] | None:
+    """(source, class_name) for a hash: the stored snapshot, else a loaded class whose code has that hash.
+
+    pygeodata stores a class's source only when it runs, so the live code of an
+    edited-but-not-yet-run class (the 'Live' version) has no stored snapshot.
+    """
+    src = vreg.source_registry
+    text = src.get_source(source_hash)
+    if text is not None:
+        return text, src.get_class_name_from_hash(source_hash)
+    cls = next((c for c in TrackedObject.get_registered_objects() if _live_source_hash(c) == source_hash), None)
+    return (get_source_code(cls), cls.get_class_name()) if cls is not None else None
+
+
+def _live_source_hash(cls: type[TrackedObject]) -> str | None:
+    try:
+        return calculate_cls_source_hash(cls)
+    except (OSError, TypeError):  # source unavailable (e.g. defined interactively)
+        return None
+
+
 def snapshot_html(source_hash: str, vreg: VersionRegistry) -> dict | None:
     """Return {'class_name': ..., 'lines': [...]} for the given source hash.
 
     Returns None if the snapshot is not found (caller should abort(404)).
     """
     src = vreg.source_registry
-    source_text = src.get_source(source_hash)
-    if source_text is None:
+    found = _source_text(source_hash, vreg)
+    if found is None:
         return None
 
-    class_name = src.get_class_name_from_hash(source_hash)
+    source_text, class_name = found
     known_classes = frozenset(TrackedObject._registry.keys()) | frozenset(src.class_names)
     lines = [
         {'text': line, 'cls_link': line.strip() if line.strip() in known_classes else None}
@@ -179,11 +201,11 @@ def diff_hashes(hash_old: str, hash_new: str, full: bool, vreg: VersionRegistry)
 
     Returns {'hunks': [...], 'full_old'?: str, 'full_new'?: str}.
     """
-    src = vreg.source_registry
-    text_old = src.get_source(hash_old)
-    text_new = src.get_source(hash_new)
-    if text_old is None or text_new is None:
+    old = _source_text(hash_old, vreg)
+    new = _source_text(hash_new, vreg)
+    if old is None or new is None:
         return None
+    text_old, text_new = old[0], new[0]
 
     result: dict = {'hunks': _build_structured_hunks(text_old, text_new)}
     if full:

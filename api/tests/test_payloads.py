@@ -12,6 +12,7 @@ from pygeodata.catalog.types import (
     FileRef,
     LinkedEntry,
     ParamRow,
+    ParamRowType,
     SpecInfo,
 )
 from pygeodata.config import JSONKeys
@@ -25,6 +26,8 @@ from pygeodata_browser.payloads import (
     _sidebar_counts,
     build_browser_payload,
     build_entries_page_payload,
+    build_find_entries_payload,
+    build_pinned_entries_payload,
     version_groups_payload,
 )
 from pygeodata_browser.state import AppState
@@ -694,6 +697,41 @@ def test_build_detail_payload_linked_entries():
     assert linked[0][JSONKeys.CLASS_NAME] == 'BaseLoader'
 
 
+def test_linked_entry_summary_keeps_every_list_value() -> None:
+    ref = ParamRow(
+        path='diseases',
+        key_group='',
+        final_key='diseases',
+        value_text='DiseaseSpec',
+        value_type='ref',
+        depth=0,
+        row_type=ParamRowType.DATA_REF,
+    )
+    rows = [
+        ref,
+        make_row(key='label', value='who', group='diseases'),
+        make_row(key='codes[]', value='11260', group='diseases'),
+        make_row(key='codes[]', value='11820', group='diseases'),
+        make_row(key='features[0]', value='FeatureSpec', group='diseases'),
+        make_row(key='features[1]', value='FeatureSpec', group='diseases'),
+        make_row(key='other', value='x', group='elsewhere'),
+    ]
+    le = LinkedEntry(param_name='diseases', class_name='DiseaseSpec', state_hash=None)
+    entry = make_entry(rows=rows, linked_entries=[le])
+    state = make_state(entries={'rec1': entry}, classes={'MyLoader': make_class_info('MyLoader')})
+    detail = _build_detail_payload(
+        state=state,
+        selected_entry_info=entry,
+        selected_classes=[],
+        vreg=state.version_registry,
+    )
+    assert detail['selected_entry']['linked_entries'][0]['params_summary'] == {
+        'label': ['who'],
+        'codes[]': ['11260', '11820'],
+        'features[]': ['FeatureSpec', 'FeatureSpec'],
+    }
+
+
 # ---------------------------------------------------------------------------
 # build_browser_payload (top-level integration)
 # ---------------------------------------------------------------------------
@@ -929,3 +967,75 @@ def test_entries_page_max_rows_always_returns_one_entry() -> None:
 def test_entries_page_max_rows_ignored_without_param_rows() -> None:
     payload = build_entries_page_payload(_wide_state(), selected_classes=['MyLoader'], row_display='none', max_rows=1)
     assert len(_page_ids(payload)) == 5
+
+
+def test_entries_page_only_ids_restricts_to_pinned() -> None:
+    payload = build_entries_page_payload(
+        _wide_state(), selected_classes=['MyLoader'], only_ids={'rec1', 'rec3', 'gone'}
+    )
+    assert _page_ids(payload) == ['rec1', 'rec3']
+    assert payload['total'] == 2
+
+
+def test_linked_entry_summary_resolves_repeated_param_names() -> None:
+    def ref(key: str, cls: str, group: str = '') -> ParamRow:
+        return ParamRow(
+            path=key,
+            key_group=group,
+            final_key=key,
+            value_text=cls,
+            value_type='ref',
+            depth=0,
+            row_type=ParamRowType.DATA_REF,
+        )
+
+    rows = [
+        ref('df_loader', 'Outer'),
+        ref('df_loader', 'Inner', group='df_loader'),
+        make_row(key='year', value='2020', group='df_loader'),
+        make_row(key='region', value='EU', group='df_loader › df_loader'),  # noqa: RUF001
+    ]
+    links = [
+        LinkedEntry(param_name='df_loader', class_name='Outer', state_hash=None),
+        LinkedEntry(param_name='df_loader', class_name='Inner', state_hash=None),
+    ]
+    entry = make_entry(rows=rows, linked_entries=links)
+    state = make_state(entries={'rec1': entry}, classes={'MyLoader': make_class_info('MyLoader')})
+    detail = _build_detail_payload(
+        state=state,
+        selected_entry_info=entry,
+        selected_classes=[],
+        vreg=state.version_registry,
+    )
+    summaries = [le['params_summary'] for le in detail['selected_entry']['linked_entries']]
+    assert summaries == [
+        {'df_loader': ['Inner'], 'year': ['2020']},
+        {'region': ['EU']},
+    ]
+
+
+def test_find_entries_by_id_prefix() -> None:
+    entries = {
+        rid: make_entry(record_id=rid, class_name=cls)
+        for rid, cls in [('abc123', 'MyLoader'), ('abd999', 'MyLoader'), ('ffff00', 'Other')]
+    }
+    state = make_state(entries=entries, classes={'MyLoader': make_class_info('MyLoader', object_type='table')})
+    assert build_find_entries_payload(state, 'ab') == [
+        {'record_id': 'abc123', 'class_name': 'MyLoader', 'object_type': 'table'},
+        {'record_id': 'abd999', 'class_name': 'MyLoader', 'object_type': 'table'},
+    ]
+    assert build_find_entries_payload(state, 'ff') == [
+        {'record_id': 'ffff00', 'class_name': 'Other', 'object_type': None},
+    ]
+    assert build_find_entries_payload(state, 'ab', limit=1) == [
+        {'record_id': 'abc123', 'class_name': 'MyLoader', 'object_type': 'table'},
+    ]
+
+
+def test_pinned_entries_skip_missing_and_keep_order() -> None:
+    entries = {rid: make_entry(record_id=rid, class_name='MyLoader') for rid in ('aaa', 'bbb')}
+    state = make_state(entries=entries, classes={'MyLoader': make_class_info('MyLoader')})
+    assert build_pinned_entries_payload(state, ['bbb', 'gone', 'aaa']) == [
+        {'record_id': 'bbb', 'class_name': 'MyLoader', 'object_type': 'data'},
+        {'record_id': 'aaa', 'class_name': 'MyLoader', 'object_type': 'data'},
+    ]

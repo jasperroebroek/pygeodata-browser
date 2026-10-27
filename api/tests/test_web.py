@@ -730,3 +730,30 @@ def test_dashboard_loading_payload_reports_fast(app, monkeypatch) -> None:
     resp = app.test_client().post('/api/dashboard', json={})
     assert resp.status_code == 202
     assert isinstance(resp.get_json().get('fast'), bool)
+
+
+# --- Frontend routes ---
+
+
+def test_root_serves_built_frontend_and_assets(client, tmp_path: Path) -> None:
+    dist = tmp_path / 'app'
+    (dist / 'assets').mkdir(parents=True)
+    (dist / 'index.html').write_text('<div id="app"></div>', encoding='utf-8')
+    (dist / 'assets' / 'index.js').write_text('console.log(1)', encoding='utf-8')
+    with patch('pygeodata_browser.web._APP_DIST', dist):
+        assert client.get('/').data == b'<div id="app"></div>'
+        assert client.get('/assets/index.js').data == b'console.log(1)'
+
+
+def test_root_explains_missing_build(client, tmp_path: Path) -> None:
+    with patch('pygeodata_browser.web._APP_DIST', tmp_path / 'missing'):
+        resp = client.get('/')
+    assert resp.status_code == 404
+    assert b'npm run build' in resp.data
+
+
+@pytest.mark.parametrize('path', ['/app', '/app/'])
+def test_old_app_urls_redirect_to_root(client, path: str) -> None:
+    resp = client.get(path)
+    assert resp.status_code == 301
+    assert resp.headers['Location'] == '/'

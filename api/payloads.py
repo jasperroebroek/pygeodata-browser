@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from pygeodata.catalog.filters import Filter, entry_matches_filters, matching_rows, parse_filters
@@ -7,6 +8,8 @@ from pygeodata.registries.registry import SourceRegistry
 from pygeodata.registries.versioning import VersionRegistry
 from pygeodata.spec import SpecKeys
 from pygeodata_browser.state import AppState
+
+_LIST_INDEX = re.compile(r'\[\d+\]$')
 
 # ---------------------------------------------------------------------------
 # Small serialisers — one responsibility each
@@ -33,7 +36,12 @@ def _file_payload(file_ref: FileRef) -> dict:
     }
 
 
-def _linked_entry_payload(le: LinkedEntry, entry: EntryInfo) -> dict:
+def _linked_entries_payload(entry: EntryInfo) -> list[dict]:
+    claimed: set[int] = set()
+    return [_linked_entry_payload(le, entry, claimed) for le in entry.linked_entries]
+
+
+def _linked_entry_payload(le: LinkedEntry, entry: EntryInfo, claimed: set[int]) -> dict:
     """The linked entry's params are flattened into the parent's rows under the
     link's own scope — derive the summary from those, nothing is stored.
 
@@ -41,29 +49,39 @@ def _linked_entry_payload(le: LinkedEntry, entry: EntryInfo) -> dict:
     ``param_name``, nested ones (e.g. ``features[3]`` inside ``feature_specs``)
     use ``feature_specs › features[3]``. Direct children of that scope are the
     linked loader's own params — ``feature_cls`` naming the actual feature.
+
+    The same param name can occur at several depths (``df_loader`` inside
+    ``df_loader``), so the ref row must also name the linked class, and each ref
+    row serves one link; ``claimed`` carries that across an entry's links.
     """
     scope = None
     if le.param_name:
-        for row in entry.rows:
-            if row.final_key == le.param_name and row.row_type in (ParamRowType.DATA_REF, ParamRowType.CLASS_REF):
-                scope = f'{row.key_group} › {row.final_key}' if row.key_group else row.final_key
-                break
-    summary: dict[str, str] = {}
-    indexed: dict[str, str] = {}
+        refs = [
+            (i, row)
+            for i, row in enumerate(entry.rows)
+            if i not in claimed
+            and row.final_key == le.param_name
+            and row.row_type in (ParamRowType.DATA_REF, ParamRowType.CLASS_REF)
+        ]
+        match = next(((i, row) for i, row in refs if row.value_text == le.class_name), refs[0] if refs else None)
+        if match:
+            i, row = match
+            claimed.add(i)
+            scope = f'{row.key_group} › {row.final_key}' if row.key_group else row.final_key
+    summary: dict[str, list[str]] = {}
     if scope:
         for row in entry.rows:
-            if row.key_group == scope:
-                target = indexed if row.final_key[-1] == ']' else summary
-                if row.final_key not in target:
-                    target[row.final_key] = row.value_text
-    if len(indexed) > 12:
-        indexed = dict(list(indexed.items())[:12])
-    summary.update(indexed)
+            if row.key_group != scope:
+                continue
+            key = _LIST_INDEX.sub('[]', row.final_key)
+            values = summary.setdefault(key, [])
+            if key.endswith('[]') or not values:
+                values.append(row.value_text)
     return {
         'param_name': le.param_name,
         'class_name': le.class_name,
         'state_hash': le.state_hash,
-        'params_summary': {k: v[:80] for k, v in summary.items()},
+        'params_summary': summary,
     }
 
 
@@ -428,7 +446,7 @@ def _entry_detail_payload(entry: EntryInfo, same_instance_runs: list[EntryInfo] 
         'same_instance_runs': [_same_instance_run_payload(s) for s in (same_instance_runs or [])],
         'rows': [_row_payload(r) for r in entry.rows],
         'params_tree': format_json(_params_tree(entry)),
-        'linked_entries': [_linked_entry_payload(le, entry) for le in entry.linked_entries],
+        'linked_entries': _linked_entries_payload(entry),
     }
 
 
@@ -801,8 +819,11 @@ def build_entries_page_payload(
     selected_entry: str | None = None,
     ids_only: bool = False,
     max_rows: int | None = None,
+    only_ids: set[str] | None = None,
 ) -> dict:
     """One page of visible header rows across the selected classes.
+
+    ``only_ids`` further restricts the result to those entries (the pinned view).
 
     Filtering always sees the full class; only the payload is paginated, so
     ``total`` is exact for the current filter state. ``max_rows`` additionally
@@ -819,7 +840,7 @@ def build_entries_page_payload(
 
     if ids_only:
         fast_ids = getattr(state.entries, 'visible_ids', None)
-        if fast_ids is not None and not parsed_filters and not spec_filters:
+        if fast_ids is not None and not parsed_filters and not spec_filters and only_ids is None:
             ids = fast_ids(
                 selected_classes=selected_classes,
                 kind_filter=kind_filter,
@@ -840,7 +861,12 @@ def build_entries_page_payload(
         hide_stale=hide_stale,
         snapshot_filter=dep_hash_set,
     )
-    entries = [(class_name, e) for class_name, group in visible_groups for e in group]
+    entries = [
+        (class_name, e)
+        for class_name, group in visible_groups
+        for e in group
+        if only_ids is None or e.record_id in only_ids
+    ]
     total = len(entries)
     if ids_only:
         return {'ids': [e.record_id for _, e in entries], 'total': total}
@@ -887,3 +913,26 @@ def build_entry_detail_payload(state: AppState, *, record_id: str) -> dict | Non
         selected_classes=[entry.class_name],
         vreg=state.version_registry,
     )
+
+
+def _entry_ref(state: AppState, record_id: str) -> dict:
+    """Identity of one entry (id, class, kind) without enriching its class."""
+    class_of = getattr(state.entries, 'class_of', None)
+    class_name = class_of(record_id) if class_of else state.entries[record_id].class_name
+    info = state.classes.get(class_name)
+    return {
+        'record_id': record_id,
+        'class_name': class_name,
+        'object_type': info.object_type if info else None,
+    }
+
+
+def build_find_entries_payload(state: AppState, prefix: str, limit: int = 20) -> list[dict]:
+    """Entries whose id starts with ``prefix``."""
+    ids = [record_id for record_id in sorted(state.entries.keys()) if record_id.startswith(prefix)]
+    return [_entry_ref(state, record_id) for record_id in ids[:limit]]
+
+
+def build_pinned_entries_payload(state: AppState, pins: list[str]) -> list[dict]:
+    """Pinned entries that still exist, in pin order."""
+    return [_entry_ref(state, record_id) for record_id in pins if record_id in state.entries]

@@ -15,7 +15,7 @@ cd app && npx vite --port 5173 --strictPort
 | `python -I pdiff.py a.png b.png out.png` | Pixel diff with red overlay (needs PIL). |
 | `node toggles.mjs [url]` | Functional checks of every toolbar/sidebar toggle. |
 | `node detail.mjs` | Detail pane and code-view actions. |
-| `node perf.mjs legacy\|svelte` | Load/click/scroll timings and API bytes. |
+| `node perf.mjs [url]` | Load/click/scroll timings and API bytes (default: the built app on :8780). |
 | `node prof.mjs [url]` | CPU profile of one page append. |
 
 The checks assume the `apes` project (e.g. class `AridityIndex` with 8 entries).

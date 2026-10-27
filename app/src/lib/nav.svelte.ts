@@ -1,4 +1,5 @@
-import { setView } from './stores.svelte';
+import { classesState, detailState, navigateToClass, setView, tableState, ui } from './stores.svelte';
+import type { View } from './stores.svelte';
 
 export type BrowseMode = 'version' | 'class';
 export type CodeKind = 'all' | 'data' | 'table' | 'figure' | 'trackedobject';
@@ -38,6 +39,9 @@ export const codeNav = $state({
   target: null as CodeTarget | null,
   diffRecordId: null as string | null,
   diffClassName: null as string | null,
+  versionId: null as string | null,
+  /** Class open in the code view; switching to Entries selects it. */
+  currentClass: null as string | null,
 });
 
 /**
@@ -50,10 +54,37 @@ export function navigateToCodeClass(className: string, opts: { depHash?: string 
   setView('code');
 }
 
+/** Jump to the code view with a version selected (browse by version). */
+export function navigateToCodeVersion(versionId: string) {
+  setBrowseMode('version');
+  codeNav.versionId = versionId;
+  codeNav.target = null;
+  codeNav.diffRecordId = null;
+  setView('code');
+}
+
 /** Jump to the code view showing what changed in the code since an entry was computed. */
 export function showWhatChanged(recordId: string, className: string | null = null) {
   codeNav.diffRecordId = recordId;
   codeNav.diffClassName = className;
   codeNav.target = null;
   setView('code');
+}
+
+/** Tab switches carry the class selection between the Entries and Code views. */
+export function switchView(view: View) {
+  if (view === ui.view) return;
+  const selected = tableState.selectedClasses;
+  if (view === 'code' && selected.length === 1) {
+    const entry = detailState.current?.selected_entry;
+    navigateToCodeClass(selected[0], { depHash: entry?.class_name === selected[0] ? entry.dep_hash : null });
+    return;
+  }
+  const cls = codeNav.currentClass;
+  const hasEntries = !!cls && classesState.cards.some((c) => c.class_name === cls && c.total_record_count > 0);
+  if (view === 'entries' && ui.view === 'code' && hasEntries && !(selected.length === 1 && selected[0] === cls)) {
+    void navigateToClass(cls!);
+    return;
+  }
+  setView(view);
 }
