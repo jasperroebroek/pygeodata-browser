@@ -349,7 +349,7 @@
                   {#if bl}
                     <button
                       class="act-btn js-bounds-map"
-                      onclick={() => openModal(`Bounds — ${e.spec.crs ?? ''}`, { kind: 'iframe', src: api.boundsMapUrl(bl, e.spec.crs ?? '') })}
+                      onclick={() => openModal(`Bounds — ${e.spec.crs ?? ''}`, { kind: 'bounds', bounds: bl, crs: e.spec.crs ?? '' })}
                     >
                       {e.spec.bounds_display}
                     </button>

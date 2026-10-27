@@ -3,6 +3,7 @@
   import { closeModal, modal } from '../lib/modal.svelte';
   import { navigateToCodeClass } from '../lib/nav.svelte';
   import { zoomable } from '../lib/zoom';
+  import BoundsMap from './BoundsMap.svelte';
   import CleanPanel from './CleanPanel.svelte';
   import DiagnosticsTable from './DiagnosticsTable.svelte';
   import JsonExplorer from './JsonExplorer.svelte';
@@ -64,6 +65,8 @@
           <div class="jx-popup-wrap">
             <JsonExplorer data={c.data} filterHidden={false} {knownClasses} onClass={(cls) => toCode(cls, c.depHash ?? null)} />
           </div>
+        {:else if current.content.kind === 'bounds'}
+          <BoundsMap bounds={current.content.bounds} crs={current.content.crs} />
         {:else if current.content.kind === 'iframe'}
           <iframe src={current.content.src} title={current.title} style="width:100%;height:74vh;border:0"></iframe>
         {:else if current.content.kind === 'image'}

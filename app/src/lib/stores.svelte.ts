@@ -84,7 +84,7 @@ const PANE_STORAGE: Record<PaneKey, string> = {
 };
 
 export const layout = $state({
-  // Detailed on normal/wide screens, compact on narrow ones (legacy boot rule).
+  // Detailed on normal/wide screens, compact on narrow ones.
   entriesMode: (window.innerWidth >= 1000 ? 'detailed' : 'compact') as EntriesMode,
   sidebarCollapsed: stored('registry.sidebar-collapsed') === '1',
   // Dragged pane widths; null keeps the stylesheet default.

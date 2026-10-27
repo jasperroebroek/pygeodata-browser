@@ -24,7 +24,6 @@ from pygeodata_browser.payloads import (
     _entry_is_visible,
     _entry_matches_spec_filters,
     _sidebar_counts,
-    build_browser_payload,
     build_entries_page_payload,
     build_find_entries_payload,
     build_pinned_entries_payload,
@@ -730,96 +729,6 @@ def test_linked_entry_summary_keeps_every_list_value() -> None:
         'codes[]': ['11260', '11820'],
         'features[]': ['FeatureSpec', 'FeatureSpec'],
     }
-
-
-# ---------------------------------------------------------------------------
-# build_browser_payload (top-level integration)
-# ---------------------------------------------------------------------------
-
-
-def test_build_browser_payload_structure():
-    state = simple_state()
-    payload = build_browser_payload(
-        state,
-        selected_classes=[],
-        selected_entry=None,
-        kind_filter='all',
-        spec_filters={},
-        filters=[],
-        logic_mode='AND',
-        row_display='none',
-    )
-    assert 'class_cards' in payload
-    assert 'table_rows' in payload
-    assert 'detail' in payload
-    assert 'counts' in payload
-    assert 'visible_entry_ids' in payload
-    assert 'diagnostics' in payload
-    assert 'spec_options' in payload
-
-
-def test_build_browser_payload_counts():
-    state = simple_state()
-    payload = build_browser_payload(
-        state,
-        selected_classes=[],
-        selected_entry=None,
-        kind_filter='all',
-        spec_filters={},
-        filters=[],
-        logic_mode='AND',
-        row_display='none',
-    )
-    counts = payload['counts']
-    assert counts['classes'] == 1
-    assert counts['entries'] == 1
-    assert counts['visible_classes'] == 1
-    assert counts['visible_entries'] == 1
-
-
-def test_build_browser_payload_invalid_selected_entry_cleared():
-    state = simple_state()
-    payload = build_browser_payload(
-        state,
-        selected_classes=[],
-        selected_entry='nonexistent',
-        kind_filter='all',
-        spec_filters={},
-        filters=[],
-        logic_mode='AND',
-        row_display='none',
-    )
-    assert payload['selected_entry'] is None
-
-
-def test_build_browser_payload_filters_parsed_from_dicts():
-    state = simple_state()
-    payload = build_browser_payload(
-        state,
-        selected_classes=[],
-        selected_entry=None,
-        kind_filter='all',
-        spec_filters={},
-        filters=[{'target': 'class', 'operator': 'equals', 'value': 'OtherLoader'}],
-        logic_mode='AND',
-        row_display='none',
-    )
-    assert payload['counts']['visible_entries'] == 0
-
-
-def test_build_browser_payload_visible_entry_ids():
-    state = simple_state()
-    payload = build_browser_payload(
-        state,
-        selected_classes=[],
-        selected_entry=None,
-        kind_filter='all',
-        spec_filters={},
-        filters=[],
-        logic_mode='AND',
-        row_display='none',
-    )
-    assert payload['visible_entry_ids'] == ['rec1']
 
 
 # ===========================================================================

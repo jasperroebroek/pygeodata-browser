@@ -11,9 +11,8 @@ standalone:
 python -m pygeodata_browser
 ```
 
-The package reads the same on-disk layout as the legacy in-repo browser
-(`.source/` registries, cache roots, `.source/catalog.db`) and is a drop-in
-replacement for it.
+It reads a pygeodata project's on-disk state: the `.source/` registries, the
+cache roots and `.source/catalog.db`.
 
 ## Install
 
@@ -47,14 +46,15 @@ npm run build             # writes api/static/app/ (needed for `pygeodata browse
 
 ## Release
 
-Pushing a version tag publishes to PyPI:
+The version comes from the git tag (setuptools-scm); there is no version string
+to bump. Pushing a version tag publishes to PyPI:
 
 ```
-# bump __version__ in api/__init__.py, commit, then
 git tag v0.1.0 && git push --tags
 ```
 
 `.github/workflows/release.yml` builds the frontend, builds the wheel and sdist
 (both ship the prebuilt frontend, so installing never needs Node), checks them
-with `scripts/check_dist.py`, and publishes through PyPI trusted publishing. The
-tag must match `__version__`.
+with `scripts/check_dist.py`, and publishes through PyPI trusted publishing.
+
+Requires pygeodata 0.3.x; release a compatible pygeodata first when both change.

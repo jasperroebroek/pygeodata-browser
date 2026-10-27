@@ -5,31 +5,10 @@ import re
 import tempfile
 from pathlib import Path
 
-from pygeodata.ast import get_source_code
 from pygeodata.graphs import plot_class_dependency_graph
-from pygeodata.registries.registry import SourceRegistry
 from pygeodata.tracked_object import TrackedObject
 
 logger = logging.getLogger(__name__)
-
-
-def _linkify_class_names(escaped_source: str, known_classes: frozenset[str], current_class: str) -> str:
-    """Replace occurrences of known class names in HTML-escaped source with clickable spans."""
-    sorted_names = sorted(known_classes - {current_class}, key=len, reverse=True)
-    if not sorted_names:
-        return escaped_source
-
-    # Build a pattern that matches whole identifiers only
-    pattern = r'\b(' + '|'.join(re.escape(n) for n in sorted_names) + r')\b'
-
-    def replace(m: re.Match) -> str:
-        name = m.group(1)
-        return (
-            f'<span class="src-cls-link" data-cls="{html.escape(name)}" '
-            f'title="Jump to {html.escape(name)}">{html.escape(name)}</span>'
-        )
-
-    return re.sub(pattern, replace, escaped_source)
 
 
 def build_json_popup(file_path: str) -> dict:
@@ -45,39 +24,6 @@ def build_json_popup(file_path: str) -> dict:
     return {
         'title': path.name,
         'json': data,
-    }
-
-
-def render_source_html(source_text: str, known_classes: frozenset[str], current_class: str) -> str:
-    lines = source_text.splitlines()
-    rows = []
-    for i, line in enumerate(lines, 1):
-        escaped_line = _linkify_class_names(html.escape(line), known_classes, current_class)
-        rows.append(f'<tr class="diff-ctx"><td class="diff-ln">{i}</td><td class="diff-code">{escaped_line}</td></tr>')
-    return f'<table class="diff-table diff-table--inline source-table">{"".join(rows)}</table>'
-
-
-def build_source_popup(class_name: str, source_path: str | None = None) -> dict[str, str]:
-    cls = TrackedObject.find_object_class(class_name)
-
-    if cls is not None:
-        source = get_source_code(cls)
-    elif source_path is not None:
-        try:
-            source = Path(source_path).read_text()
-        except OSError as exc:
-            raise FileNotFoundError(source_path) from exc
-    else:
-        logger.error('Cannot build source popup: class not in registry and no source_path: %s', class_name)
-        raise KeyError(class_name)
-
-    src = SourceRegistry()
-    known_classes = frozenset(TrackedObject._registry.keys()) | frozenset(src.class_names)
-    body = render_source_html(source, known_classes, class_name)
-
-    return {
-        'title': f'Source · {class_name}',
-        'html': body,
     }
 
 

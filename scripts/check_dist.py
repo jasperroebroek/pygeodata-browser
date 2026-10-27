@@ -15,8 +15,6 @@ def check(names: list[str], prefix: str, label: str) -> list[str]:
         errors.append(f'{label}: missing {prefix}static/app/index.html (was `npm run build` run?)')
     if not any(n.startswith(f'{prefix}static/app/assets/') and n.endswith('.js') for n in names):
         errors.append(f'{label}: no built JS under {prefix}static/app/assets/')
-    if f'{prefix}templates/bounds_map.html' not in names:
-        errors.append(f'{label}: missing {prefix}templates/bounds_map.html')
     for forbidden in ('node_modules/', 'app/src/', 'static/js/', 'static/css/'):
         hits = [n for n in names if forbidden in n]
         if hits:

@@ -6,7 +6,8 @@ export interface SpecPayload {
   resolution_display: string | null;
   shape: string | null;
   bounds: string | null;
-  bounds_latlon: number[] | null;
+  /** [lat_min, lon_min, lat_max, lon_max] */
+  bounds_latlon: [number, number, number, number] | null;
   bounds_display: string | null;
 }
 
@@ -264,8 +265,6 @@ export const api = {
     ),
 
   fileUrl: (path: string) => `/api/file?path=${encodeURIComponent(path)}`,
-  boundsMapUrl: (bounds: number[], crs: string) =>
-    `/api/bounds-map?bounds=${encodeURIComponent(JSON.stringify(bounds))}&crs=${encodeURIComponent(crs)}`,
 
   openPath: (path: string) => postJSON('/api/open', { path }),
   revealPath: (path: string) => postJSON('/api/reveal', { path }),

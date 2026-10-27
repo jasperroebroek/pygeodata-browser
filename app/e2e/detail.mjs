@@ -42,7 +42,7 @@ await close();
 // Bounds map
 if (await count('.js-bounds-map')) {
   await page.click('.js-bounds-map'); await wait(800);
-  check('Bounds map modal', (await count('.modal-content iframe')) === 1); await close();
+  check('Bounds map modal', (await count('.modal-content .bounds-map .leaflet-container')) === 1); await close();
 }
 // Table entry
 const tableCls = await page.locator('.class-card:has(.kind-icon--table)').first().getAttribute('title');

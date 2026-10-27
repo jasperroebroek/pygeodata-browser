@@ -145,8 +145,8 @@ def test_api_status_surfaces_load_error(client, app) -> None:
     web_mod._ctx.load_error = None
 
 
-def test_api_dashboard_returns_202_while_loading(client) -> None:
-    resp = client.post('/api/dashboard', json={})
+def test_api_classes_returns_202_while_loading(client) -> None:
+    resp = client.get('/api/classes')
     # Either 202 (loading) or 200 (loaded) — both are valid
     assert resp.status_code in (200, 202)
 
@@ -196,13 +196,6 @@ def test_api_file_serves_table_html(client, tmp_path: Path, app) -> None:
     resp = client.get(f'/api/file?path={f}')
     assert resp.status_code == 200
     assert b'<table>' in resp.data
-
-
-def test_api_bounds_map_returns_html(client) -> None:
-    bounds = json.dumps([-10.0, -20.0, 10.0, 20.0])
-    resp = client.get(f'/api/bounds-map?bounds={bounds}&crs=EPSG:4326')
-    assert resp.status_code == 200
-    assert b'html' in resp.data.lower() or b'map' in resp.data.lower()
 
 
 # --- /api/code routes ---
@@ -722,12 +715,12 @@ def test_api_status_reports_fast_flag(client) -> None:
     assert 'fast' in resp.get_json()
 
 
-def test_dashboard_loading_payload_reports_fast(app, monkeypatch) -> None:
+def test_loading_payload_reports_fast(app, monkeypatch) -> None:
     from pygeodata_browser import web
     from pygeodata_browser.state import AppContext
 
     monkeypatch.setattr(web, '_ctx', AppContext())  # never started — permanently loading
-    resp = app.test_client().post('/api/dashboard', json={})
+    resp = app.test_client().get('/api/classes')
     assert resp.status_code == 202
     assert isinstance(resp.get_json().get('fast'), bool)
 
@@ -750,10 +743,3 @@ def test_root_explains_missing_build(client, tmp_path: Path) -> None:
         resp = client.get('/')
     assert resp.status_code == 404
     assert b'npm run build' in resp.data
-
-
-@pytest.mark.parametrize('path', ['/app', '/app/'])
-def test_old_app_urls_redirect_to_root(client, path: str) -> None:
-    resp = client.get(path)
-    assert resp.status_code == 301
-    assert resp.headers['Location'] == '/'

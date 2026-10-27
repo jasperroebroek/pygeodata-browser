@@ -18,8 +18,6 @@ from flask import (
     Response,
     abort,
     jsonify,
-    redirect,
-    render_template,
     request,
     send_file,
     send_from_directory,
@@ -35,7 +33,6 @@ from pygeodata_browser.logging import configure_logging
 from pygeodata_browser.path_actions import open_path, reveal_path
 from pygeodata_browser.payloads import (
     _build_table_rows,
-    build_browser_payload,
     build_classes_payload,
     build_entries_page_payload,
     build_entry_detail_payload,
@@ -45,7 +42,6 @@ from pygeodata_browser.payloads import (
 from pygeodata_browser.popups import (
     build_graph_popup,
     build_json_popup,
-    build_source_popup,
 )
 from pygeodata_browser.state import AppContext
 from werkzeug.exceptions import HTTPException
@@ -113,13 +109,6 @@ def app_asset(filename: str) -> Response:
     return send_from_directory(_APP_DIST / 'assets', filename)
 
 
-@app.get('/app')
-@app.get('/app/')
-def app_redirect() -> Response:
-    """The frontend used to live under /app/; keep old links working."""
-    return redirect('/', code=301)
-
-
 @app.get('/api/bootstrap')
 def api_bootstrap() -> Response:
     """Most recent entry per class — served instantly while the full state builds."""
@@ -138,16 +127,6 @@ def api_popup_json():
     return jsonify(build_json_popup(str(path)))
 
 
-@app.get('/api/popup/source')
-def api_popup_source():
-    return jsonify(
-        build_source_popup(
-            request.args['class_name'],
-            source_path=request.args.get('source_path'),
-        ),
-    )
-
-
 @app.get('/api/popup/graph')
 def api_popup_graph():
     return jsonify(
@@ -155,25 +134,6 @@ def api_popup_graph():
             request.args['class_name'],
             graph_path=request.args.get('graph_path'),
         ),
-    )
-
-
-@app.get('/api/bounds-map')
-def api_bounds_map():
-    bounds = json.loads(request.args['bounds'])  # [lat_min, lon_min, lat_max, lon_max]
-    crs = request.args.get('crs', '')
-    lat_min, lon_min, lat_max, lon_max = bounds
-    sw = f'{abs(lat_min)}° {"N" if lat_min >= 0 else "S"}, {abs(lon_min)}° {"E" if lon_min >= 0 else "W"}'
-    ne = f'{abs(lat_max)}° {"N" if lat_max >= 0 else "S"}, {abs(lon_max)}° {"E" if lon_max >= 0 else "W"}'
-    label = f'{sw} → {ne}'
-    return render_template(
-        'bounds_map.html',
-        lat_min=lat_min,
-        lon_min=lon_min,
-        lat_max=lat_max,
-        lon_max=lon_max,
-        label=label,
-        crs=crs,
     )
 
 
@@ -219,29 +179,6 @@ def api_status():
             'has_live_classes': bool(TrackedObject._registry),
             'fast': bool(app.config.get('FAST')),
         },
-    )
-
-
-@app.post('/api/dashboard')
-def api_dashboard():
-    if _ctx.is_loading() or _ctx.state is None:
-        return _loading()
-    payload = request.get_json(force=True) or {}
-    return jsonify(
-        build_browser_payload(
-            _ctx.state,
-            selected_classes=payload.get('selected_classes', []),
-            selected_entry=payload.get('selected_entry'),
-            kind_filter=payload.get('kind_filter', 'all'),
-            spec_filters=payload.get('spec_filters', {}),
-            filters=payload.get('filters', []),
-            logic_mode=payload.get('logic_mode', 'AND'),
-            row_display=payload.get('row_display', 'none'),
-            include_rows=bool(payload.get('include_rows', True)),
-            auto_open=bool(payload.get('auto_open', False)),
-            hide_stale=bool(payload.get('hide_stale', False)),
-            version_filter=payload.get('version_filter') or None,
-        ),
     )
 
 
