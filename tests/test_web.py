@@ -3,7 +3,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 from pygeodata.config import set_config
 from pygeodata.registries.versioning import VersionRegistry
 from pygeodata_browser.state import AppContext, AppState
@@ -151,10 +150,18 @@ def test_api_classes_returns_202_while_loading(client) -> None:
     assert resp.status_code in (200, 202)
 
 
-def test_api_rebuild_triggers_reload(client) -> None:
-    resp = client.post('/api/rebuild')
+def test_api_rebuild_triggers_reload(tmp_path: Path) -> None:
+    with set_config(path_registry=tmp_path / '.source'):
+        ctx = _make_ready_ctx()
+        flask_app.config['TESTING'] = True
+        with (
+            patch('pygeodata_browser.web._ctx', ctx),
+            patch('pygeodata_browser.state.threading.Thread') as thread_cls,
+        ):
+            resp = flask_app.test_client().post('/api/rebuild')
     assert resp.status_code == 202
     assert resp.get_json().get('loading') is True
+    thread_cls.assert_called_once()
 
 
 def test_api_popup_json_valid(client, tmp_path: Path, app) -> None:
@@ -311,8 +318,12 @@ def test_api_code_resolve_dep_hash(tmp_path: Path) -> None:
     assert data['version_id'] == ctx.state.version_registry.versions[-1].version_id
 
 
-def test_api_code_resolve_dep_hash_missing(client) -> None:
-    resp = client.get('/api/code/resolve-dep-hash?dep_hash=doesnotexist&class_name=Foo')
+def test_api_code_resolve_dep_hash_missing(tmp_path: Path) -> None:
+    with set_config(path_registry=tmp_path / '.source'):
+        ctx = _make_ready_ctx()
+        flask_app.config['TESTING'] = True
+        with patch('pygeodata_browser.web._ctx', ctx):
+            resp = flask_app.test_client().get('/api/code/resolve-dep-hash?dep_hash=doesnotexist&class_name=Foo')
     assert resp.status_code == 404
 
 
@@ -384,8 +395,12 @@ def test_api_code_snapshot_not_found(tmp_path: Path) -> None:
     assert resp.status_code == 404
 
 
-def test_api_code_snapshot_missing_hash(client) -> None:
-    resp = client.get('/api/code/snapshot')
+def test_api_code_snapshot_missing_hash(tmp_path: Path) -> None:
+    with set_config(path_registry=tmp_path / '.source'):
+        ctx = _make_ready_ctx()
+        flask_app.config['TESTING'] = True
+        with patch('pygeodata_browser.web._ctx', ctx):
+            resp = flask_app.test_client().get('/api/code/snapshot')
     assert resp.status_code == 400
 
 
@@ -414,8 +429,12 @@ def test_api_code_diff_missing_params(client) -> None:
     assert resp.status_code == 400
 
 
-def test_api_code_diff_not_found(client, tmp_path: Path, app) -> None:
-    resp = client.get('/api/code/diff?hash_old=doesnotexist&hash_new=alsonotexist')
+def test_api_code_diff_not_found(tmp_path: Path) -> None:
+    with set_config(path_registry=tmp_path / '.source'):
+        ctx = _make_ready_ctx()
+        flask_app.config['TESTING'] = True
+        with patch('pygeodata_browser.web._ctx', ctx):
+            resp = flask_app.test_client().get('/api/code/diff?hash_old=doesnotexist&hash_new=alsonotexist')
     assert resp.status_code == 404
 
 
@@ -470,13 +489,21 @@ def test_api_code_version_diff_no_snapshot(tmp_path: Path) -> None:
     assert data['error'] == 'no_snapshot'
 
 
-def test_api_code_version_diff_missing_record(client) -> None:
-    resp = client.get('/api/code/version-diff?record_id=doesnotexist')
+def test_api_code_version_diff_missing_record(tmp_path: Path) -> None:
+    with set_config(path_registry=tmp_path / '.source'):
+        ctx = _make_ready_ctx()
+        flask_app.config['TESTING'] = True
+        with patch('pygeodata_browser.web._ctx', ctx):
+            resp = flask_app.test_client().get('/api/code/version-diff?record_id=doesnotexist')
     assert resp.status_code == 404
 
 
-def test_api_code_version_diff_missing_param(client) -> None:
-    resp = client.get('/api/code/version-diff')
+def test_api_code_version_diff_missing_param(tmp_path: Path) -> None:
+    with set_config(path_registry=tmp_path / '.source'):
+        ctx = _make_ready_ctx()
+        flask_app.config['TESTING'] = True
+        with patch('pygeodata_browser.web._ctx', ctx):
+            resp = flask_app.test_client().get('/api/code/version-diff')
     assert resp.status_code == 400
 
 

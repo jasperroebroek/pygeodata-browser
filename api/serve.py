@@ -7,7 +7,8 @@ from pygeodata_browser.web import create_app
 
 class ThreadingWSGIServer(ThreadingMixIn, WSGIServer):
     """Concurrent request handling: a large dashboard payload must not block
-    figure/table previews and status polls behind it."""
+    figure/table previews and status polls behind it.
+    """
 
     daemon_threads = True
 

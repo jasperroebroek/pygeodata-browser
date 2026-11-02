@@ -19,7 +19,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 from pygeodata.config import JSONKeys, set_config
 from pygeodata.registries.versioning import VersionRegistry
 from pygeodata_browser.state import AppContext, AppState

@@ -2,6 +2,7 @@
   import { classesState } from '../lib/stores.svelte';
   import { closeModal, modal } from '../lib/modal.svelte';
   import { navigateToCodeClass } from '../lib/nav.svelte';
+  import { progressiveSrc } from '../lib/progressive';
   import { zoomable } from '../lib/zoom';
   import BoundsMap from './BoundsMap.svelte';
   import CleanPanel from './CleanPanel.svelte';
@@ -72,10 +73,11 @@
         {:else if current.content.kind === 'image'}
           <div style="display:flex;align-items:center;justify-content:center;height:100%;overflow:hidden">
             <img
-              src={current.content.src}
+              src={current.content.preview}
               alt={current.title}
+              use:progressiveSrc={current.content.src}
               use:zoomable
-              style="max-width:100%;max-height:100%;object-fit:contain;cursor:grab;user-select:none"
+              style="width:100%;height:100%;object-fit:contain;cursor:grab;user-select:none"
             />
           </div>
         {:else if current.content.kind === 'html'}

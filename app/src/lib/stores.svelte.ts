@@ -796,6 +796,7 @@ export function pollStatus() {
 export async function init() {
   applyTheme();
   pollStatus();
+  pollIdleVersion();
   // Bootstrap rows (latest entry per class, ~2 MB) only bridge a still-building state.
   try {
     if ((await api.status()).ready) return;
@@ -804,4 +805,33 @@ export async function init() {
   } catch {
     /* the status poll keeps retrying */
   }
+}
+
+// ---------------------------------------------------------------------------
+// Idle version poll — the backend swaps in a new state offscreen (periodic
+// reconcile); this quietly refreshes the visible data when it does.
+// ---------------------------------------------------------------------------
+
+let seenVersion: number | null = null;
+let idleTimer: ReturnType<typeof setTimeout> | null = null;
+const IDLE_POLL_MS = 5000;
+
+function pollIdleVersion() {
+  const check = async () => {
+    idleTimer = null;
+    try {
+      const status: StatusPayload = await api.status();
+      const changed = seenVersion !== null && status.version !== seenVersion;
+      seenVersion = status.version;
+      // Only refresh visible data once the initial state is fully built; the
+      // loading poll handles transitions into ready.
+      if (changed && status.ready && ui.ready) {
+        await onReady();
+      }
+    } catch {
+      /* backend briefly unreachable */
+    }
+    idleTimer = setTimeout(check, IDLE_POLL_MS);
+  };
+  void check();
 }

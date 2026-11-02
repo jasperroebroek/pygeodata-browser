@@ -1,5 +1,4 @@
 import click
-
 from pygeodata_browser.serve import open_registry_browser
 
 

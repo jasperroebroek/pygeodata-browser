@@ -2,7 +2,7 @@ export type ModalContent =
   | { kind: 'json'; data: unknown; codeNav: boolean; depHash?: string | null }
   | { kind: 'iframe'; src: string }
   | { kind: 'bounds'; bounds: [number, number, number, number]; crs: string }
-  | { kind: 'image'; src: string }
+  | { kind: 'image'; src: string; preview: string }
   | { kind: 'html'; html: string; className?: string }
   | { kind: 'graph'; svg: string }
   | { kind: 'diagnostics' }

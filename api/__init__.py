@@ -7,4 +7,4 @@ try:
 except PackageNotFoundError:  # imported from a source tree that is not installed
     __version__ = '0+unknown'
 
-__all__ = ['open_registry_browser', '__version__']
+__all__ = ['__version__', 'open_registry_browser']

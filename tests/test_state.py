@@ -14,7 +14,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 from pygeodata.config import (
     FORMAT_VERSION,
     JSONKeys,
@@ -22,8 +21,9 @@ from pygeodata.config import (
 )
 from pygeodata.paths import CachePathConstructor
 from pygeodata.registries.registry import EntryRegistry
-from pygeodata_browser.state import AppContext, _reconcile
 from pygeodata.tracked_object import TrackedObject
+from pygeodata_browser import state
+from pygeodata_browser.state import AppContext
 
 
 def _write_hash_file(
@@ -170,3 +170,39 @@ def test_reimport_rebuild_reconciles_catalog(tmp_path: Path) -> None:
             ctx.ready.wait(timeout=60)
 
         assert reconciled, 'reimport must reconcile the catalog'
+
+
+# ---------------------------------------------------------------------------
+# Periodic reconcile: cheap change detection, offscreen swap
+# ---------------------------------------------------------------------------
+
+
+def test_reconcile_periodic_noop_when_nothing_changed(tmp_path: Path) -> None:
+    """Neither catalog nor code changed: no swap, ready stays set."""
+    ctx = AppContext()
+    ctx.ready.set()
+    with set_config(path_registry=tmp_path / '.source', path_catalog=tmp_path / '.catalog.json'):
+        state._remember_catalog()
+        state._remember_code()
+
+        with patch.object(ctx, 'swap_state') as swap:
+            state.reconcile_periodic(ctx, reimport=True)
+        swap.assert_not_called()
+        assert ctx.ready.is_set()
+
+
+def test_reconcile_periodic_swaps_when_catalog_changed(tmp_path: Path) -> None:
+    """A catalog file change triggers an offscreen swap."""
+    from pygeodata.catalog import store
+
+    ctx = AppContext()
+    ctx.ready.set()
+    with set_config(path_registry=tmp_path / '.source', path_catalog=tmp_path / '.catalog.json'):
+        state._remember_catalog()
+        state._remember_code()
+
+        store.save_catalog(store.load_catalog())
+
+        with patch.object(ctx, 'swap_state') as swap:
+            state.reconcile_periodic(ctx, reimport=False)
+        swap.assert_called_once_with(reimport=False)

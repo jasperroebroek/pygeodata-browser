@@ -1,7 +1,10 @@
 import sys
+
 from PIL import Image, ImageChops
+
 a, b, out = sys.argv[1:4]
-A = Image.open(a).convert('RGB'); B = Image.open(b).convert('RGB')
+A = Image.open(a).convert('RGB')
+B = Image.open(b).convert('RGB')
 d = ImageChops.difference(A, B).convert('L').point(lambda v: 255 if v > 24 else 0)
 bbox = d.getbbox()
 n = sum(1 for v in d.getdata() if v)

@@ -7,17 +7,14 @@ groups, dep-hash sets, per-class counts) never touch the display JSON, so the
 common dashboard requests stay on the fast path.
 """
 
-from pygeodata.catalog import models, store
+from pygeodata.catalog import store
 from pygeodata.catalog.entry_catalog import _enrich_params_path, _entry_info_from_display, _spec_info
-from pygeodata.catalog.models import FileRole
 from pygeodata.catalog.types import EntryInfo, FileRef, LinkedEntry, ParamRow, ParamRowType
-from pygeodata.config import FORMAT_VERSION, catalog_db_path, get_config
+from pygeodata.config import FORMAT_VERSION, get_config
 from pygeodata.registries.registry import EntryRegistry
 from pygeodata.registries.versioning import VersionRegistry
 from pygeodata.spec import SpecKeys
 from pygeodata.tracked_object import TrackedObject
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 
 class EntryStore:
@@ -246,33 +243,40 @@ class EntryStore:
 
 def _display_for_hashes(state_hashes: list[str]) -> dict[str, dict] | None:
     """Display payload for a specific set of entries, or None when the catalog is unusable."""
-    if not state_hashes or not catalog_db_path().exists():
+    if not state_hashes or not get_config().path_catalog.is_file():
         return None
-    source_root = get_config().path_registry
-    base = source_root.resolve().parent
-    engine = store.get_engine(str(source_root.resolve()))
-    display: dict[str, dict] = {}
-    with Session(engine) as session:
-        files_by_hash: dict[str, dict] = {}
-        files_stmt = select(models.EntryFile).where(models.EntryFile.state_hash.in_(state_hashes))
-        for f in session.execute(files_stmt).scalars():
-            ref = FileRef(label=f.label, path=str(base / f.relpath), kind=f.kind)
-            files_by_hash.setdefault(f.state_hash, {}).setdefault(f.role, []).append(ref)
+    catalog = store.load_catalog()
+    if not catalog['entries']:
+        return None
 
-        stmt = select(models.Entry).where(models.Entry.state_hash.in_(state_hashes))
-        for row in session.execute(stmt).scalars():
-            entry_dir = store.entry_abs_path(source_root, row.dir_relpath)
-            files = files_by_hash.get(row.state_hash, {})
-            rows = [ParamRow(**{**r, 'row_type': ParamRowType(r['row_type'])}) for r in (row.rows or [])]
-            linked = [LinkedEntry(**le) for le in (row.linked_entries or [])]
-            display[row.state_hash] = {
-                'entry_dir': entry_dir,
-                'spec': _spec_info(row.crs_hash, row.transform_hash, row.shape_hash),
-                'rows': rows,
-                'linked_entries': linked,
-                'primary_file': files.get(FileRole.PRIMARY, [None])[0],
-                'sidecar_files': files.get(FileRole.SIDECAR, []),
-            }
+    files_by_hash: dict[str, dict] = {}
+    for state_hash in state_hashes:
+        entry_row = catalog['entries'].get(state_hash)
+        if entry_row is None:
+            continue
+        entry_dir = store.entry_abs_path(entry_row['dir_relpath'])
+        files_by_hash.setdefault(state_hash, {})
+        for f in catalog['files'].get(state_hash, []):
+            ref = FileRef(label=f['label'], path=str(entry_dir / f['relpath']), kind=f['kind'])
+            files_by_hash[state_hash].setdefault(f['role'], []).append(ref)
+
+    display: dict[str, dict] = {}
+    for state_hash in state_hashes:
+        entry_row = catalog['entries'].get(state_hash)
+        if entry_row is None:
+            continue
+        entry_dir = store.entry_abs_path(entry_row['dir_relpath'])
+        files = files_by_hash.get(state_hash, {})
+        rows = [ParamRow(**{**r, 'row_type': ParamRowType(r['row_type'])}) for r in (entry_row['rows'] or [])]
+        linked = [LinkedEntry(**le) for le in (entry_row['linked_entries'] or [])]
+        display[state_hash] = {
+            'entry_dir': entry_dir,
+            'spec': _spec_info(entry_row['crs_hash'], entry_row['transform_hash'], entry_row['shape_hash']),
+            'rows': rows,
+            'linked_entries': linked,
+            'primary_file': files.get('primary', [None])[0],
+            'sidecar_files': files.get('sidecar', []),
+        }
     return display or None
 
 
@@ -282,14 +286,12 @@ def spec_options_from_catalog() -> dict | None:
     Only distinct (crs, transform, shape) triples reconstruct a SpatialSpec
     (memoized in ``_spec_info``), so this stays cheap regardless of entry count.
     """
-    if not catalog_db_path().exists():
+    if not get_config().path_catalog.is_file():
         return None
-    source_root = get_config().path_registry
-    engine = store.get_engine(str(source_root.resolve()))
-    with Session(engine) as session:
-        triples = session.execute(
-            select(models.Entry.crs_hash, models.Entry.transform_hash, models.Entry.shape_hash).distinct()
-        ).all()
+    catalog = store.load_catalog()
+    if not catalog['entries']:
+        return None
+    triples = {(row['crs_hash'], row['transform_hash'], row['shape_hash']) for row in catalog['entries'].values()}
 
     specs = [_spec_info(crs, transform, shape) for crs, transform, shape in triples]
     resolution_labels = {spec.resolution_display for spec in specs if spec.resolution_display}

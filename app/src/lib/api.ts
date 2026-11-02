@@ -165,6 +165,7 @@ export interface StatusPayload {
   ready: boolean;
   progress: { done?: number; total?: number; reimport_done?: number; reimport_total?: number };
   load_error: string | null;
+  version: number;
   has_live_classes: boolean;
   fast: boolean;
 }

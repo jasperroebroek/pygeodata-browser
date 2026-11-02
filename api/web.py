@@ -24,10 +24,8 @@ from flask import (
 )
 from pygeodata.cache import clean_cache, clean_source_registry
 from pygeodata.catalog import store
-from pygeodata.config import FORMAT_VERSION, get_config
+from pygeodata.config import get_config
 from pygeodata.tracked_object import TrackedObject
-from sqlalchemy.engine import Engine
-
 from pygeodata_browser import code_service, export_service, payloads
 from pygeodata_browser.logging import configure_logging
 from pygeodata_browser.path_actions import open_path, reveal_path
@@ -43,7 +41,7 @@ from pygeodata_browser.popups import (
     build_graph_popup,
     build_json_popup,
 )
-from pygeodata_browser.state import AppContext
+from pygeodata_browser.state import AppContext, reconcile_periodic
 from werkzeug.exceptions import HTTPException
 
 _ctx: AppContext = AppContext()  # replaced by create_app() on startup
@@ -112,10 +110,8 @@ def app_asset(filename: str) -> Response:
 @app.get('/api/bootstrap')
 def api_bootstrap() -> Response:
     """Most recent entry per class — served instantly while the full state builds."""
-    source_root = get_config().path_registry
     try:
-        engine = store.get_engine(str(source_root.resolve()), format_version=FORMAT_VERSION)
-        rows = store.bootstrap_rows(engine)
+        rows = store.bootstrap_rows(store.load_catalog())
     except Exception:  # noqa: BLE001 — bootstrap is best-effort; the full load follows
         rows = []
     return jsonify(rows)
@@ -176,6 +172,7 @@ def api_status():
             'ready': _ctx.ready.is_set(),
             'progress': _ctx.progress,
             'load_error': _ctx.load_error,
+            'version': _ctx.version,
             'has_live_classes': bool(TrackedObject._registry),
             'fast': bool(app.config.get('FAST')),
         },
@@ -219,7 +216,7 @@ def api_class_entries():
     ids_only = request.args.get('ids_only') == '1'
     only_ids = None
     if request.args.get('pinned_only') == '1':
-        pinned = build_pinned_entries_payload(_ctx.state, store.pinned_hashes(_catalog_engine()))
+        pinned = build_pinned_entries_payload(_ctx.state, store.pinned_hashes())
         only_ids = {p['record_id'] for p in pinned}
         classes = classes or sorted({p['class_name'] for p in pinned})
     if not classes and not ids_only:
@@ -259,12 +256,8 @@ def api_find_entries() -> Response | tuple[dict, int]:
     return jsonify({'entries': build_find_entries_payload(_ctx.state, q)})
 
 
-def _catalog_engine() -> Engine:
-    return store.get_engine(str(get_config().path_registry.resolve()), FORMAT_VERSION)
-
-
 def _pins_response() -> Response:
-    pins = store.pinned_hashes(_catalog_engine())
+    pins = store.pinned_hashes()
     return jsonify({'pins': build_pinned_entries_payload(_ctx.state, pins)})
 
 
@@ -281,7 +274,7 @@ def api_pin(record_id: str) -> Response | tuple[dict, int]:
         return _loading()
     if record_id not in _ctx.state.entries:
         abort(404)
-    store.set_pinned(_catalog_engine(), record_id, pinned=True)
+    store.set_pinned(record_id, pinned=True)
     return _pins_response()
 
 
@@ -289,7 +282,7 @@ def api_pin(record_id: str) -> Response | tuple[dict, int]:
 def api_unpin(record_id: str) -> Response | tuple[dict, int]:
     if _ctx.is_loading() or _ctx.state is None:
         return _loading()
-    store.set_pinned(_catalog_engine(), record_id, pinned=False)
+    store.set_pinned(record_id, pinned=False)
     return _pins_response()
 
 
@@ -696,8 +689,9 @@ def create_app(
 ) -> Flask:
     """``fast`` serves the UI immediately from the bootstrap payload while the
     full state builds; the default blocks until the first full state is ready.
-    A daemon thread reconciles the catalog (and optionally reimports project
-    modules) every ``reconcile_interval`` seconds.
+    A daemon thread checks every ``reconcile_interval`` seconds whether the
+    catalog file or the project code changed and swaps in a rebuilt state
+    offscreen — the UI never blocks and the cache is never rescanned.
     """
     global _ctx
     configure_logging(logging.INFO)
@@ -710,7 +704,7 @@ def create_app(
             while True:
                 time.sleep(reconcile_interval)
                 if not _ctx.is_loading():
-                    _ctx.start_reload(reimport=reimport_on_reconcile)
+                    reconcile_periodic(_ctx, reimport=reimport_on_reconcile)
 
         threading.Thread(target=_periodic_reconcile, daemon=True).start()
     return app

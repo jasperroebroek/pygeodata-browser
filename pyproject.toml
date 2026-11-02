@@ -19,7 +19,7 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "pygeodata>=0.3.0,<0.4",  # needs the 0.3 catalog (pins table, partial specs)
+    "pygeodata>=0.4,<0.5",  # needs the 0.4 identity-aware instance hashes (pins table, partial specs)
     "flask",
 ]
 

@@ -1,5 +1,4 @@
 import pytest
-
 from pygeodata.catalog.types import SpecInfo
 from pygeodata.spec import SpatialSpec, format_resolution
 
@@ -63,9 +62,8 @@ def test_spec_info_bounds_latlon_epsg4326() -> None:
 
 def test_spec_info_bounds_latlon_none_when_no_transform_no_area() -> None:
     # No transform → bounds is None → bounds_latlon is None
-    from pyproj import CRS
-
     from pygeodata.spec import SpatialSpec
+    from pyproj import CRS
 
     info = SpecInfo.from_spec(SpatialSpec(crs=CRS.from_epsg(4326)))
     assert info.bounds_latlon is None

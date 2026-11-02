@@ -20,6 +20,7 @@
     tableState,
   } from '../lib/stores.svelte';
   import { toast } from '../lib/toast.svelte';
+  import { progressiveSrc } from '../lib/progressive';
   import { zoomable } from '../lib/zoom';
   import AssociatedEntries from './AssociatedEntries.svelte';
   import JsonExplorer, { HIDDEN_JSON_KEYS } from './JsonExplorer.svelte';
@@ -159,8 +160,10 @@
                 src={api.thumbUrl(e.record_id)}
                 alt=""
                 loading="eager"
+                use:progressiveSrc={api.fileUrl(path)}
                 use:zoomable
-                onclick={() => openModal('Preview', { kind: 'image', src: api.fileUrl(path) })}
+                onclick={() =>
+                  openModal('Preview', { kind: 'image', src: api.fileUrl(path), preview: api.thumbUrl(e.record_id) })}
               />
             {/key}
           </div>

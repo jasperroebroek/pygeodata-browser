@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from pygeodata_browser.popups import (
     _inject_graph_links,
     build_json_popup,

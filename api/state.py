@@ -22,10 +22,51 @@ from pygeodata.tracked_object import TrackedObject
 from pygeodata_browser.entry_store import EntryStore, spec_options_from_catalog
 
 _active_state: 'AppState | None' = None
+_catalog_sig: tuple[int, int] | None = None
+_code_sig: dict[str, int] | None = None
 
 
 def _ctx_state() -> 'AppState | None':
     return _active_state
+
+
+def catalog_changed() -> bool:
+    """Whether the catalog file changed since the last state build (mtime + size)."""
+    global _catalog_sig
+    try:
+        stat = get_config().path_catalog.stat()
+    except OSError:
+        sig = None
+    else:
+        sig = (stat.st_mtime_ns, stat.st_size)
+    if sig == _catalog_sig:
+        return False
+    return True
+
+
+def _remember_catalog() -> None:
+    global _catalog_sig
+    try:
+        stat = get_config().path_catalog.stat()
+        _catalog_sig = (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        _catalog_sig = None
+
+
+def project_code_changed() -> bool:
+    """Whether any project .py file was added, removed, or modified since the last import."""
+    global _code_sig
+    root = Path.cwd()
+    current = {str(f): f.stat().st_mtime_ns for f in _collect_reimport_files(root) if f.is_file()}
+    if current == _code_sig:
+        return False
+    return True
+
+
+def _remember_code() -> None:
+    global _code_sig
+    root = Path.cwd()
+    _code_sig = {str(f): f.stat().st_mtime_ns for f in _collect_reimport_files(root) if f.is_file()}
 
 
 _SKIP_DIRS = {'venv', 'env', '.venv', 'build', 'dist', 'site-packages', 'tests', 'test', 'cache'}
@@ -62,13 +103,18 @@ class AppContext:
         self.ready = threading.Event()
         self.progress: dict = {}
         self.load_error: str | None = None
+        self.version: int = 0
 
     def start_load(self) -> None:
         def _load() -> None:
             try:
-                _reconcile()
+                if not get_config().path_catalog.is_file():
+                    _reconcile()
                 self.state = build_state(progress=self.progress)
                 self.load_error = None
+                _remember_catalog()
+                _remember_code()
+                self.version += 1
                 _prewarm_async(self.state)
             except Exception:
                 self.load_error = traceback.format_exc()
@@ -77,7 +123,35 @@ class AppContext:
 
         threading.Thread(target=_load, daemon=True).start()
 
+    def swap_state(self, reimport: bool = False) -> None:
+        """Build a fresh state offscreen and swap it in; the UI never blocks.
+
+        The old state keeps serving every request until the new one is complete —
+        a single reference assignment under the GIL is the only visible change.
+        """
+
+        def _swap() -> None:
+            try:
+                progress: dict = {}
+                if reimport:
+                    root = Path.cwd()
+                    py_files = _collect_reimport_files(root)
+                    progress['reimport_total'] = len(py_files)
+                    for done in _reimport_modules(py_files, root):
+                        progress['reimport_done'] = done + 1
+                    _remember_code()
+                self.state = build_state(progress=progress)
+                self.load_error = None
+                _remember_catalog()
+                self.version += 1
+                _prewarm_async(self.state)
+            except Exception:
+                _log.warning('background state swap failed; keeping the previous state', exc_info=True)
+
+        threading.Thread(target=_swap, daemon=True).start()
+
     def start_reload(self, reimport: bool = False) -> None:
+        """Blocking reload: the UI shows the loading screen until the new state is ready."""
         self.ready.clear()
         self.progress.clear()
 
@@ -96,6 +170,9 @@ class AppContext:
                 _reconcile()
                 self.state = build_state(progress=self.progress)
                 self.load_error = None
+                _remember_catalog()
+                _remember_code()
+                self.version += 1
                 _prewarm_async(self.state)
             except Exception:
                 self.load_error = traceback.format_exc()
@@ -106,6 +183,19 @@ class AppContext:
 
     def is_loading(self) -> bool:
         return not self.ready.is_set()
+
+
+def reconcile_periodic(ctx: 'AppContext', reimport: bool) -> None:
+    """Timer path: cheap change detection, offscreen swap — the UI never blocks or rescans.
+
+    A stat of the catalog file catches entries indexed at write time (also by another
+    machine, when the catalog is synced); project .py mtimes catch code edits. Only a
+    real change pays for a state rebuild, and the cache is never traversed.
+    """
+    code_changed = reimport and project_code_changed()
+    if not code_changed and not catalog_changed():
+        return
+    ctx.swap_state(reimport=code_changed)
 
 
 def _prewarm_async(state: AppState) -> None:
@@ -140,7 +230,7 @@ def _prewarm_async(state: AppState) -> None:
 def _reconcile() -> None:
     """Backfill new cache entries into the catalog and prune rows whose entry is gone."""
     config = get_config()
-    store.refresh(config.path_registry, config.cache_roots, FORMAT_VERSION)
+    store.refresh(config.cache_roots, FORMAT_VERSION)
 
 
 def _collect_reimport_files(root: Path) -> list[Path]:

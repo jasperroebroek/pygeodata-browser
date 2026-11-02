@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from pygeodata.catalog.filters import Filter, FilterTarget
 from pygeodata.catalog.types import (
     ClassInfo,
@@ -16,6 +15,7 @@ from pygeodata.catalog.types import (
     SpecInfo,
 )
 from pygeodata.config import JSONKeys
+from pygeodata.spec import SpecKeys
 from pygeodata_browser.payloads import (
     _build_class_cards,
     _build_detail_payload,
@@ -30,7 +30,6 @@ from pygeodata_browser.payloads import (
     version_groups_payload,
 )
 from pygeodata_browser.state import AppState
-from pygeodata.spec import SpecKeys
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -662,7 +661,8 @@ def test_build_detail_payload_no_table_preview_for_non_table():
 def test_build_detail_payload_co_outputs_key_matches_frontend():
     """Guards a real bug: the payload key must be 'co_outputs' (what detail.js reads via
     entry.co_outputs), not 'co_output_hashes' (JSONKeys.CO_OUTPUTS' value, which was
-    previously used here by mistake and made the co-outputs card silently never render)."""
+    previously used here by mistake and made the co-outputs card silently never render).
+    """
     co_entry = make_entry(record_id='co1', class_name='CoLoader')
     entry = make_entry(record_id='rec1', class_name='MyLoader', co_outputs=[co_entry])
     cls = make_class_info('MyLoader')
@@ -880,7 +880,9 @@ def test_entries_page_max_rows_ignored_without_param_rows() -> None:
 
 def test_entries_page_only_ids_restricts_to_pinned() -> None:
     payload = build_entries_page_payload(
-        _wide_state(), selected_classes=['MyLoader'], only_ids={'rec1', 'rec3', 'gone'}
+        _wide_state(),
+        selected_classes=['MyLoader'],
+        only_ids={'rec1', 'rec3', 'gone'},
     )
     assert _page_ids(payload) == ['rec1', 'rec3']
     assert payload['total'] == 2
