@@ -1,0 +1,111 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 6 * * 1'  # weekly: catches drift in pygeodata main and the dependencies
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CONDA_PACKAGES: >-
+    pip pytest pytest-mock packaging
+    numpy rioxarray geopandas fiona pyarrow zarr dask
+    filelock click lazy_loader affine msgspec
+    libgdal-netcdf graphviz python-graphviz
+    flask platformdirs pillow
+
+jobs:
+  python:
+    name: pytest (pygeodata ${{ matrix.pygeodata }}, py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pygeodata: [main, min]
+        python: ['3.11', '3.14']
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # setuptools-scm reads the version from git tags
+
+      - uses: mamba-org/setup-micromamba@v3
+        with:
+          environment-name: ci
+          create-args: python=${{ matrix.python }} ${{ env.CONDA_PACKAGES }}
+          condarc: |
+            channels: [conda-forge]
+            channel_priority: strict
+          cache-environment: true
+
+      # The minimum supported release is the lower bound of the pygeodata requirement.
+      # While PyPI has no release satisfying it (not yet published), the min job warns and
+      # skips; it starts testing by itself once the release appears.
+      - name: Resolve the pygeodata to test against
+        id: pygeodata
+        env:
+          FLAVOUR: ${{ matrix.pygeodata }}
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, tomllib, urllib.request
+          from packaging.requirements import Requirement
+          from packaging.version import Version
+
+          if os.environ['FLAVOUR'] == 'main':
+              print('spec=git+https://github.com/jasperroebroek/pygeodata@main')
+              print('available=true')
+              raise SystemExit
+
+          with open('pyproject.toml', 'rb') as f:
+              deps = tomllib.load(f)['project']['dependencies']
+          req = next(r for r in map(Requirement, deps) if r.name == 'pygeodata')
+          lower = [s for s in req.specifier if s.operator in ('>=', '==', '~=')]
+          minimum = Version(lower[0].version)
+          with urllib.request.urlopen('https://pypi.org/pypi/pygeodata/json') as r:
+              released = {Version(v) for v in json.load(r)['releases']}
+          print(f'spec=pygeodata=={minimum}')
+          print(f'available={str(minimum in released).lower()}')
+          PY
+          cat "$GITHUB_OUTPUT"
+
+      - name: Warn that the minimum release is not on PyPI yet
+        if: steps.pygeodata.outputs.available != 'true'
+        run: |
+          msg="Skipped: ${{ steps.pygeodata.outputs.spec }} is not released on PyPI yet, so the minimum supported pygeodata is untested."
+          echo "::warning title=min pygeodata not released::$msg"
+          echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install pygeodata and the browser
+        if: steps.pygeodata.outputs.available == 'true'
+        run: |
+          python -m pip install '${{ steps.pygeodata.outputs.spec }}'
+          python -m pip install --no-deps -e .
+          python -m pip list | grep -i pygeodata
+
+      - name: Tests
+        if: steps.pygeodata.outputs.available == 'true'
+        run: python -m pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22  # as release.yml; vite 7 needs >=20.19
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
