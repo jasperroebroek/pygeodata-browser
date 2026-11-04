@@ -61,8 +61,7 @@
     { kind: 'command', key: 'v-entries', label: 'Go to Entries', icon: ListTree, run: () => switchView('entries') },
     { kind: 'command', key: 'v-code', label: 'Go to Code', icon: Code, run: () => switchView('code') },
     { kind: 'command', key: 'v-export', label: 'Go to Export', icon: FileDown, run: () => switchView('export') },
-    { kind: 'command', key: 'reload', label: 'Reload from disk', icon: RefreshCw, run: () => void startReload(false) },
-    { kind: 'command', key: 'reimport', label: 'Reimport Python files', icon: RefreshCw, run: () => void startReload(true) },
+    { kind: 'command', key: 'reload', label: 'Reload', icon: RefreshCw, run: () => void startReload() },
     { kind: 'command', key: 'compact', label: 'Compact entry list', icon: List, run: () => void setEntriesMode('compact') },
     { kind: 'command', key: 'detailed', label: 'Detailed entry table', icon: Table2, run: () => void setEntriesMode('detailed') },
     {

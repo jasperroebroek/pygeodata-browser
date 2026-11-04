@@ -8,7 +8,6 @@ import string
 import tarfile
 import tempfile
 import threading
-import time
 import uuid
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -26,7 +25,6 @@ from pygeodata.cache import clean_cache, clean_source_registry
 from pygeodata.catalog import store
 from pygeodata.catalog.types import CatalogData, CatalogEntry
 from pygeodata.config import get_config
-from pygeodata.tracked_object import TrackedObject
 from pygeodata_browser import code_service, export_service, payloads
 from pygeodata_browser.logging import configure_logging
 from pygeodata_browser.path_actions import open_path, reveal_path
@@ -42,10 +40,14 @@ from pygeodata_browser.popups import (
     build_graph_popup,
     build_json_popup,
 )
-from pygeodata_browser.state import AppContext, reconcile_periodic
+from pygeodata_browser.state import AppContext
 from werkzeug.exceptions import HTTPException
 
 _ctx: AppContext = AppContext()  # replaced by create_app() on startup
+
+
+def _has_current_classes() -> bool:
+    return _ctx.state is not None and bool(_ctx.state.analysis.classes)
 
 
 def _loading():
@@ -141,9 +143,12 @@ def api_popup_json():
 
 @app.get('/api/popup/graph')
 def api_popup_graph():
+    if _ctx.is_loading() or _ctx.state is None:
+        return _loading()
     return jsonify(
         build_graph_popup(
             request.args['class_name'],
+            _ctx.state.analysis,
             graph_path=request.args.get('graph_path'),
         ),
     )
@@ -186,10 +191,12 @@ def api_status():
     return jsonify(
         {
             'ready': _ctx.ready.is_set(),
-            'progress': _ctx.progress,
             'load_error': _ctx.load_error,
             'version': _ctx.version,
-            'has_live_classes': bool(TrackedObject._registry),
+            'has_live_classes': _has_current_classes(),
+            'mode': _ctx.mode,
+            'code_changed_since': _ctx.code_changed_since,
+            'next_import_at': _ctx.next_tick_at if _ctx.code_changed_since is not None else None,
             'fast': bool(app.config.get('FAST')),
         },
     )
@@ -364,9 +371,7 @@ def api_thumb(record_id: str):
 
 @app.post('/api/rebuild')
 def api_rebuild():
-    body = request.get_json(force=True, silent=True) or {}
-    reimport = bool(body.get('reimport', False))
-    _ctx.start_reload(reimport=reimport)
+    _ctx.reload()
     return _loading()
 
 
@@ -381,20 +386,24 @@ def api_delete_entry(record_id: str):
     _assert_allowed_path(str(cache_dir))
     if cache_dir.exists():
         shutil.rmtree(cache_dir)
-    _ctx.start_reload()
+    _ctx.reload()
     return jsonify({'ok': True})
 
 
 @app.post('/api/clean-cache')
 def api_clean_cache():
+    if _ctx.is_loading() or _ctx.state is None:
+        return _loading()
     body = request.get_json(force=True) or {}
     dry_run = bool(body.get('dry_run', True))
+    if not _has_current_classes():
+        abort(409, 'No project classes are known; cleaning would remove every entry')
     buf = io.StringIO()
     with redirect_stdout(buf):
-        clean_cache(dry_run=dry_run, delete_unregistered=False)
+        clean_cache(dry_run=dry_run, delete_unregistered=False, current=_ctx.state.analysis.tree_hashes.get)
     lines = [ln for ln in buf.getvalue().splitlines() if ln.strip()]
     if not dry_run:
-        _ctx.start_reload()
+        _ctx.reload()
     return jsonify({'lines': lines, 'dry_run': dry_run})
 
 
@@ -407,7 +416,7 @@ def api_clean_source():
         clean_source_registry(dry_run=dry_run)
     lines = [ln for ln in buf.getvalue().splitlines() if ln.strip()]
     if not dry_run:
-        _ctx.start_reload()
+        _ctx.reload()
     return jsonify({'lines': lines, 'dry_run': dry_run})
 
 
@@ -416,7 +425,6 @@ def api_code_versions():
     """Return merged version groups sorted newest first, with a synthetic Initial entry last."""
     if _ctx.is_loading() or _ctx.state is None:
         return _loading()
-    from pygeodata.tracked_object import TrackedObject
 
     _entries = _ctx.state.entries
     if hasattr(_entries, 'dep_hashes'):
@@ -426,7 +434,7 @@ def api_code_versions():
     return jsonify(
         {
             'versions': payloads.version_groups_payload(_ctx.state.version_registry, entry_dep_hashes),
-            'has_live_classes': bool(TrackedObject._registry),
+            'has_live_classes': _has_current_classes(),
         },
     )
 
@@ -482,7 +490,10 @@ def api_code_version_classes():
         return _loading()
     version_id = request.args.get('version_id', '')
     return jsonify(
-        [dataclasses.asdict(c) for c in code_service.version_classes(version_id, _ctx.state.version_registry)],
+        [
+            dataclasses.asdict(c)
+            for c in code_service.version_classes(version_id, _ctx.state.version_registry, _ctx.state.analysis)
+        ],
     )
 
 
@@ -512,7 +523,7 @@ def api_code_snapshot():
     source_hash = request.args.get('source_hash', '')
     if not source_hash:
         abort(400)
-    result = code_service.snapshot_html(source_hash, _ctx.state.version_registry)
+    result = code_service.snapshot_html(source_hash, _ctx.state.version_registry, _ctx.state.analysis)
     if result is None:
         abort(404)
     return jsonify(result)
@@ -532,6 +543,7 @@ def api_code_diff():
         full,
         _assert_allowed_path,
         _ctx.state.version_registry,
+        _ctx.state.analysis,
     )
     if result is None:
         abort(404)
@@ -561,6 +573,7 @@ def api_code_version_diff():
 
     result = code_service.version_diff(
         _ctx.state.version_registry,
+        _ctx.state.analysis,
         record_id=record_id,
         entries=_ctx.state.entries if record_id else None,
         base_version_id=base_version_id,
@@ -697,26 +710,19 @@ def api_export_single(record_id: str):
 def create_app(
     fast: bool = False,
     reconcile_interval: float = 300,
-    reimport_on_reconcile: bool = True,
+    import_all: bool = False,
 ) -> Flask:
     """``fast`` serves the UI immediately from the bootstrap payload while the
     full state builds; the default blocks until the first full state is ready.
-    A daemon thread checks every ``reconcile_interval`` seconds whether the
-    catalog file or the project code changed and swaps in a rebuilt state
-    offscreen — the UI never blocks and the cache is never rescanned.
+    The project is analysed from source, or with ``import_all`` by importing it in a
+    subprocess; the server process never imports project code. A daemon thread polls the
+    project's files and, every ``reconcile_interval`` seconds, the catalog (and, with
+    ``import_all``, imports changed code); the state is rebuilt offscreen.
     """
     global _ctx
     configure_logging(logging.INFO)
     app.config['FAST'] = fast
-    _ctx = AppContext()
-    _ctx.start_load()
-    if reconcile_interval > 0:
-
-        def _periodic_reconcile() -> None:
-            while True:
-                time.sleep(reconcile_interval)
-                if not _ctx.is_loading():
-                    reconcile_periodic(_ctx, reimport=reimport_on_reconcile)
-
-        threading.Thread(target=_periodic_reconcile, daemon=True).start()
+    _ctx = AppContext(mode='import' if import_all else 'static')
+    _ctx.reload()
+    _ctx.start_watching(reconcile_interval)
     return app

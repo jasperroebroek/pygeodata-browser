@@ -36,8 +36,7 @@
   </button>
   {#if open}
     <div class="topbar-menu" role="menu">
-      <button class="topbar-menu-item" role="menuitem" onclick={() => run(() => void startReload(false))}>Reload from disk</button>
-      <button class="topbar-menu-item" role="menuitem" onclick={() => run(() => void startReload(true))}>Reimport Python files</button>
+      <button class="topbar-menu-item" role="menuitem" onclick={() => run(() => void startReload())}>Reload</button>
       <div class="topbar-menu-sep"></div>
       <button
         class="topbar-menu-item"

@@ -2,7 +2,9 @@ import json
 from pathlib import Path
 
 import pytest
+from conftest import make_analysis
 from pygeodata_browser.popups import (
+    _dependency_graph,
     _inject_graph_links,
     build_json_popup,
 )
@@ -25,6 +27,32 @@ def test_inject_graph_links_unknown_class_unchanged() -> None:
 
 def test_inject_graph_links_empty_svg() -> None:
     assert _inject_graph_links('', frozenset({'MyLoader'})) == ''
+
+
+# --- _dependency_graph ---
+
+
+def test_dependency_graph_comes_from_the_analysis() -> None:
+    analysis = make_analysis(Child='c', Parent='p')
+    child = analysis.classes['Child']
+    analysis.classes['Child'] = type(child)(
+        facts=type(child.facts)(
+            name='Child',
+            object_type='Table',
+            source_hash='c',
+            call_deps=frozenset({'Parent'}),
+            bases=frozenset(),
+        ),
+        path=child.path,
+        lineno=child.lineno,
+        tree_hash=child.tree_hash,
+    )
+
+    graph = _dependency_graph(analysis, 'Child')
+
+    assert {node.name for node in graph.nodes} == {'Child', 'Parent'}
+    assert {(s.name, t.name) for s, t in graph.call_edges} == {('Child', 'Parent')}
+    assert {node.name: node.color for node in graph.nodes} == {'Child': '#c9d8c5', 'Parent': '#d0dceb'}
 
 
 # --- build_json_popup ---

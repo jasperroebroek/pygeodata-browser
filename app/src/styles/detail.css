@@ -143,20 +143,6 @@
 .file-type--table  { color: var(--type-table);  background: var(--type-table-bg);  border-color: var(--type-table-border); }
 .file-type--figure { color: var(--type-figure); background: var(--type-figure-bg); border-color: var(--type-figure-border); }
 
-.entry-warnings {
-  border-top: 1px solid var(--border);
-  padding: 8px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.entry-warning {
-  font-size: 11px;
-  color: var(--warn);
-  line-height: 1.4;
-}
-
 /* CRS link */
 .spec-cell-link {
   color: var(--accent);

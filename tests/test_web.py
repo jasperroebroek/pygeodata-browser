@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from conftest import write_entry
+from conftest import make_analysis, write_entry
 from pygeodata.config import set_config
 from pygeodata.registries.registry import EntryRegistry
 from pygeodata.registries.versioning import VersionRegistry
@@ -32,6 +32,7 @@ def _make_ready_ctx(version_registry: VersionRegistry | None = None):
         spec_options={},
         entry_registry=_FakeEntryRegistry(),
         version_registry=version_registry if version_registry is not None else VersionRegistry(),
+        analysis=make_analysis(),
     )
     ctx.ready.set()
     return ctx
@@ -60,17 +61,22 @@ def test_app_context_initial_state() -> None:
     ctx = AppContext()
     assert ctx.state is None
     assert ctx.is_loading()
-    assert ctx.progress == {}
 
 
-def test_app_context_start_reload_clears_ready() -> None:
+def test_app_context_reload_clears_ready() -> None:
     ctx = AppContext()
     ctx.ready.set()
-    ctx.progress['x'] = 1
     with patch('pygeodata_browser.state.threading.Thread'):
-        ctx.start_reload()
+        ctx.reload()
     assert not ctx.ready.is_set()
-    assert ctx.progress == {}
+
+
+def test_app_context_offscreen_reload_keeps_ready() -> None:
+    ctx = AppContext()
+    ctx.ready.set()
+    with patch('pygeodata_browser.state.threading.Thread'):
+        ctx.reload(show_loading=False)
+    assert ctx.ready.is_set()
 
 
 def test_app_context_is_loading_false_when_ready() -> None:
@@ -133,8 +139,22 @@ def test_api_status_returns_ready_flag(client, app) -> None:
     assert resp.status_code == 200
     data = resp.get_json()
     assert 'ready' in data
-    assert 'progress' in data
     assert 'load_error' in data
+    assert data['mode'] == 'static'
+    assert data['code_changed_since'] is None
+    assert data['next_import_at'] is None
+
+
+def test_api_status_reports_the_pending_import(client) -> None:
+    ctx = _make_ready_ctx()
+    ctx.mode = 'import'
+    ctx.next_tick_at = 2000.0
+    with patch('pygeodata_browser.web._ctx', ctx):
+        assert client.get('/api/status').get_json()['next_import_at'] is None
+        ctx.code_changed_since = 1500.0
+        data = client.get('/api/status').get_json()
+
+    assert (data['mode'], data['code_changed_since'], data['next_import_at']) == ('import', 1500.0, 2000.0)
 
 
 def test_api_status_surfaces_load_error(client, app) -> None:
@@ -166,6 +186,30 @@ def test_api_rebuild_triggers_reload(tmp_path: Path) -> None:
     assert resp.status_code == 202
     assert resp.get_json().get('loading') is True
     thread_cls.assert_called_once()
+
+
+def test_api_clean_cache_judges_entries_by_the_analysed_classes(client, tmp_path: Path, app) -> None:
+    cache = tmp_path / 'data_processed'
+    write_entry(cache, 'cur001', 'MyLoader', dep_hash='tree-h1')
+    write_entry(cache, 'old001', 'MyLoader', dep_hash='tree-old')
+    ctx = _make_ready_ctx()
+    ctx.state.analysis = make_analysis(MyLoader='h1')
+    with patch('pygeodata_browser.web._ctx', ctx):
+        resp = client.post('/api/clean-cache', json={'dry_run': True})
+
+    assert resp.status_code == 200
+    lines = resp.get_json()['lines']
+    assert any('old001' in line for line in lines)
+    assert not any('cur001' in line for line in lines)
+
+
+def test_api_clean_cache_refuses_when_no_classes_are_known(client, tmp_path: Path, app) -> None:
+    write_entry(tmp_path / 'data_processed', 'old001', 'MyLoader', dep_hash='tree-old')
+    with patch('pygeodata_browser.web._ctx', _make_ready_ctx()):
+        resp = client.post('/api/clean-cache', json={'dry_run': False})
+
+    assert resp.status_code == 409
+    assert (tmp_path / 'data_processed' / 'old001').exists()
 
 
 def test_api_popup_json_valid(client, tmp_path: Path, app) -> None:

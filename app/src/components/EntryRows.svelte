@@ -71,8 +71,6 @@
               {:else if r.dep_hash_stale}
                 <span class="badge badge--sm badge-warn" title="Dependencies changed — entry may be outdated">stale</span>
               {/if}
-              {#if r.warning_count}<span class="badge badge--sm badge-warn" title={r.warnings?.join('\n')}>{r.warning_count}w</span>{/if}
-              {#if r.error}<span class="badge badge--sm badge-danger" title={r.error}>!</span>{/if}
             </span>
             <span class="cell-entry-spec">
               {#each specParts(r) as part, j (j)}<span class="tbl-spec-pill">{part}</span>{/each}

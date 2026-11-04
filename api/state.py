@@ -1,74 +1,49 @@
-import importlib.util
 import logging
-import sys
 import threading
+import time
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
-from pygeodata._version import FORMAT_VERSION
-from pygeodata.catalog import store
+from pygeodata.analysis import AnalysisError, ProjectAnalysis, analyse_in_subprocess
 from pygeodata.config import get_config
+from pygeodata.project import iter_project_files
 from pygeodata.registries.registry import EntryRegistry
 from pygeodata.registries.versioning import VersionRegistry
-from pygeodata.tracked_object import TrackedObject, live_tree_hash
-from pygeodata.views.classes import imported_classes, merge_unknown_classes
+from pygeodata.static import analyse_project
+from pygeodata.views.classes import merge_unknown_classes, source_classes
 from pygeodata.views.entries import spec_options
 from pygeodata.views.types import ClassInfo, spec_info
 from pygeodata_browser.entry_store import EntryStore
 from pygeodata_browser.models import EntryInfo
 
-_active_state: 'AppState | None' = None
-_catalog_sig: tuple[int, int] | None = None
-_code_sig: dict[str, int] | None = None
-
-
-def _ctx_state() -> 'AppState | None':
-    return _active_state
-
-
-def catalog_changed() -> bool:
-    """Whether the catalog file changed since the last state build (mtime + size)."""
-    global _catalog_sig
-    try:
-        stat = get_config().path_catalog.stat()
-    except OSError:
-        sig = None
-    else:
-        sig = (stat.st_mtime_ns, stat.st_size)
-    if sig == _catalog_sig:
-        return False
-    return True
-
-
-def _remember_catalog() -> None:
-    global _catalog_sig
-    try:
-        stat = get_config().path_catalog.stat()
-        _catalog_sig = (stat.st_mtime_ns, stat.st_size)
-    except OSError:
-        _catalog_sig = None
-
-
-def project_code_changed() -> bool:
-    """Whether any project .py file was added, removed, or modified since the last import."""
-    global _code_sig
-    root = Path.cwd()
-    current = {str(f): f.stat().st_mtime_ns for f in _collect_reimport_files(root) if f.is_file()}
-    if current == _code_sig:
-        return False
-    return True
-
-
-def _remember_code() -> None:
-    global _code_sig
-    root = Path.cwd()
-    _code_sig = {str(f): f.stat().st_mtime_ns for f in _collect_reimport_files(root) if f.is_file()}
-
-
-_SKIP_DIRS = {'venv', 'env', '.venv', 'build', 'dist', 'site-packages', 'tests', 'test', 'cache'}
-_SKIP_PREFIXES = ('test_', 'conftest', 'setup', 'manage')
 _log = logging.getLogger(__name__)
+
+POLL_INTERVAL = 10.0
+IMPORT_TIMEOUT = 600.0
+
+Mode = Literal['static', 'import']
+
+
+def catalog_signature() -> tuple[int, int] | None:
+    try:
+        stat = get_config().path_catalog.stat()
+    except OSError:
+        return None
+    return (stat.st_mtime_ns, stat.st_size)
+
+
+def code_signature(root: Path) -> dict[str, int]:
+    """Modification times of the files both analyses read; stats only, nothing is read."""
+    signature: dict[str, int] = {}
+    for path in iter_project_files(root):
+        try:
+            signature[str(path)] = path.stat().st_mtime_ns
+        except OSError:
+            continue
+    return signature
 
 
 @dataclass(slots=True)
@@ -86,6 +61,7 @@ class AppState:
     spec_options: dict[str, list[str]]
     entry_registry: EntryRegistry
     version_registry: VersionRegistry
+    analysis: ProjectAnalysis
 
     def get_state_hashes(self, class_name: str) -> list[str]:
         return self.entry_registry.get_state_hashes(class_name)
@@ -95,107 +71,110 @@ class AppState:
 
 
 class AppContext:
-    def __init__(self) -> None:
+    """The state the server serves and the one way it is rebuilt: :meth:`reload`.
+
+    The project is analysed in the mode fixed at startup — read from source in this process, or
+    imported in a subprocess; the browser process never imports project code. Between reloads
+    the project's files are polled by mtime: static mode re-analyses on a change, import mode
+    only notes it and imports at the next :meth:`tick`, so a burst of edits costs one import.
+    """
+
+    def __init__(
+        self,
+        mode: Mode = 'static',
+        root: Path | None = None,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        self.mode = mode
+        self.root = root if root is not None else Path.cwd()
+        self._clock = clock
         self.state: AppState | None = None
         self.ready = threading.Event()
-        self.progress: dict = {}
         self.load_error: str | None = None
         self.version: int = 0
-
-    def start_load(self) -> None:
-        def _load() -> None:
-            try:
-                if not get_config().path_catalog.is_file():
-                    _reconcile()
-                self.state = build_state(progress=self.progress)
-                self.load_error = None
-                _remember_catalog()
-                _remember_code()
-                self.version += 1
-                _prewarm_async(self.state)
-            except Exception:
-                self.load_error = traceback.format_exc()
-            finally:
-                self.ready.set()
-
-        threading.Thread(target=_load, daemon=True).start()
-
-    def swap_state(self, reimport: bool = False) -> None:
-        """Build a fresh state offscreen and swap it in; the UI never blocks.
-
-        The old state keeps serving every request until the new one is complete —
-        a single reference assignment under the GIL is the only visible change.
-        """
-
-        def _swap() -> None:
-            try:
-                progress: dict = {}
-                if reimport:
-                    root = Path.cwd()
-                    py_files = _collect_reimport_files(root)
-                    progress['reimport_total'] = len(py_files)
-                    for done in _reimport_modules(py_files, root):
-                        progress['reimport_done'] = done + 1
-                    _remember_code()
-                self.state = build_state(progress=progress)
-                self.load_error = None
-                _remember_catalog()
-                self.version += 1
-                _prewarm_async(self.state)
-            except Exception:
-                _log.warning('background state swap failed; keeping the previous state', exc_info=True)
-
-        threading.Thread(target=_swap, daemon=True).start()
-
-    def start_reload(self, reimport: bool = False) -> None:
-        """Blocking reload: the UI shows the loading screen until the new state is ready."""
-        self.ready.clear()
-        self.progress.clear()
-
-        def _reload() -> None:
-            try:
-                if reimport:
-                    root = Path.cwd()
-                    py_files = _collect_reimport_files(root)
-                    total = len(py_files)
-                    self.progress['reimport_done'] = 0
-                    self.progress['reimport_total'] = total
-                    TrackedObject._registry.clear()
-                    for done in _reimport_modules(py_files, root):
-                        self.progress['reimport_done'] = done
-                    self.progress['reimport_done'] = total
-                _reconcile()
-                self.state = build_state(progress=self.progress)
-                self.load_error = None
-                _remember_catalog()
-                _remember_code()
-                self.version += 1
-                _prewarm_async(self.state)
-            except Exception:
-                self.load_error = traceback.format_exc()
-            finally:
-                self.ready.set()
-
-        threading.Thread(target=_reload, daemon=True).start()
+        self.code_changed_since: float | None = None
+        self.next_tick_at: float | None = None
+        self._code_sig: dict[str, int] | None = None
+        self._catalog_sig: tuple[int, int] | None = None
+        self._lock = threading.Lock()
 
     def is_loading(self) -> bool:
         return not self.ready.is_set()
 
+    def reload(self, *, show_loading: bool = True) -> threading.Thread:
+        """Analyse the project again and rebuild the state, in a thread.
 
-def reconcile_periodic(ctx: 'AppContext', reimport: bool) -> None:
-    """Timer path: cheap change detection, offscreen swap — the UI never blocks or rescans.
+        With ``show_loading`` the UI shows the loading screen until the new state is ready;
+        without, the old state keeps serving until the new one is complete and a single
+        reference assignment swaps it in. A failure keeps the previous state and sets ``load_error``.
+        """
+        if show_loading:
+            self.ready.clear()
+        thread = threading.Thread(target=self._rebuild, daemon=True)
+        thread.start()
+        return thread
 
-    A stat of the catalog file catches entries indexed at write time (also by another
-    machine, when the catalog is synced); project .py mtimes catch code edits. Only a
-    real change pays for a state rebuild, and the cache is never traversed.
-    """
-    code_changed = reimport and project_code_changed()
-    if not code_changed and not catalog_changed():
-        return
-    ctx.swap_state(reimport=code_changed)
+    def _rebuild(self) -> None:
+        with self._lock:
+            try:
+                self._code_sig = code_signature(self.root)
+                self.code_changed_since = None
+                state = build_state(self._analyse())
+            except Exception as exc:
+                self.load_error = str(exc) if isinstance(exc, AnalysisError) else traceback.format_exc()
+                _log.warning('reload failed; keeping the previous state', exc_info=True)
+            else:
+                self.state = state
+                self.load_error = None
+                self._catalog_sig = catalog_signature()
+                self.version += 1
+                _prewarm_async(self, state)
+            finally:
+                self.ready.set()
+
+    def _analyse(self) -> ProjectAnalysis:
+        if self.mode == 'import':
+            return analyse_in_subprocess(self.root, timeout=IMPORT_TIMEOUT)
+        return analyse_project(self.root)
+
+    def _busy(self) -> bool:
+        return self.is_loading() or self._lock.locked()
+
+    def poll_code(self) -> None:
+        """Stat the project's files: static mode re-analyses on a change, import mode notes it."""
+        if self._busy() or code_signature(self.root) == self._code_sig:
+            return
+        if self.mode == 'static':
+            self.reload(show_loading=False).join()
+        elif self.code_changed_since is None:
+            self.code_changed_since = self._clock()
+
+    def tick(self) -> None:
+        """The periodic check: import mode imports if code changed since its last import; both follow the catalog."""
+        if self._busy():
+            return
+        if self.mode == 'import':
+            self.poll_code()
+        if self.code_changed_since is not None or catalog_signature() != self._catalog_sig:
+            self.reload(show_loading=False).join()
+
+    def start_watching(self, reconcile_interval: float, poll_interval: float = POLL_INTERVAL) -> None:
+        """Poll the project's files every ``poll_interval`` s and tick every ``reconcile_interval`` s (0: never)."""
+
+        def _watch() -> None:
+            next_tick = self._clock() + reconcile_interval
+            while True:
+                self.next_tick_at = next_tick if reconcile_interval > 0 else None
+                time.sleep(poll_interval)
+                self.poll_code()
+                if reconcile_interval > 0 and self._clock() >= next_tick:
+                    self.tick()
+                    next_tick = self._clock() + reconcile_interval
+
+        threading.Thread(target=_watch, daemon=True).start()
 
 
-def _prewarm_async(state: AppState) -> None:
+def _prewarm_async(ctx: AppContext, state: AppState) -> None:
     """Enrich every class in the background, smallest first.
 
     The UI is usable immediately (identity hydration is instant); this absorbs
@@ -215,7 +194,7 @@ def _prewarm_async(state: AppState) -> None:
             ]
             todo.sort(key=lambda cn: len(state.entries.records_for_class(cn)))
             for class_name in todo:
-                if state is not _ctx_state():
+                if state is not ctx.state:
                     return  # a reload replaced this state; stop warming it
                 for_class(class_name)
         except Exception:
@@ -224,101 +203,30 @@ def _prewarm_async(state: AppState) -> None:
     threading.Thread(target=_warm, daemon=True).start()
 
 
-def _reconcile() -> None:
-    """Backfill new cache entries into the catalog and prune rows whose entry is gone."""
-    config = get_config()
-    store.refresh(config.cache_roots, FORMAT_VERSION)
-
-
-def _collect_reimport_files(root: Path) -> list[Path]:
-    """Return project .py files under root sorted deepest-first.
-
-    Deepest-first means leaf modules are loaded before the top-level packages
-    that import them, so cascading re-imports are mostly no-ops.
-    """
-    files = [
-        py_file
-        for py_file in root.rglob('*.py')
-        if not any(p.startswith(('.', '__pycache__')) or p in _SKIP_DIRS for p in py_file.relative_to(root).parts)
-        and not py_file.relative_to(root).parts[-1].startswith(_SKIP_PREFIXES)
-    ]
-    files.sort(key=lambda p: (-len(p.parts), p.name == '__init__.py', p))
-    return files
-
-
-def _reimport_modules(py_files: list[Path], root: Path):
-    """Import (or re-execute) a list of project .py files.
-
-    Unlike the CLI helper this re-executes already-loaded modules so edits to
-    existing classes are picked up.  Per-module failures are logged and skipped.
-
-    A file already scheduled for reimport may get pulled in transitively by an
-    ordinary ``import`` statement while an *earlier* file in this same pass is
-    being executed (e.g. file 0 does ``from src.data.gideon import ...`` before
-    ``gideon.py``'s own turn at index 4). Since it was popped from ``sys.modules``
-    up front, that ordinary import re-executes it fresh right there. If this
-    function then re-executed it *again* at its scheduled turn, every class in
-    it would collide with the one just registered by the transitive import. So
-    each file's turn checks whether ``sys.modules`` already holds a module for
-    it that was populated during this pass (not a leftover from before the
-    pass) and skips the explicit re-exec in that case -- it is already current.
-
-    Yields the index of each file just before it is processed so callers can
-    track progress against len(py_files).
-    """
-    if root not in sys.path:
-        sys.path.insert(0, str(root))
-
-    module_names = {py_file: '.'.join(py_file.relative_to(root).with_suffix('').parts) for py_file in py_files}
-    for name in module_names.values():
-        sys.modules.pop(name, None)
-
-    reimported_this_pass: set[str] = set()
-
-    for i, py_file in enumerate(py_files):
-        module_name = module_names[py_file]
-        if module_name in sys.modules and module_name not in reimported_this_pass:
-            # Pulled in transitively by an earlier file in this pass -- already fresh.
-            reimported_this_pass.add(module_name)
-            yield i
-            continue
-        try:
-            spec = importlib.util.spec_from_file_location(module_name, py_file)
-            if spec and spec.loader:
-                mod = importlib.util.module_from_spec(spec)
-                sys.modules[module_name] = mod
-                spec.loader.exec_module(mod)
-                reimported_this_pass.add(module_name)
-        except Exception:  # noqa: BLE001
-            _log.debug('reimport skip %s', module_name, exc_info=True)
-        yield i
-
-
-def build_state(progress: dict | None = None) -> AppState:
+def build_state(analysis: ProjectAnalysis) -> AppState:
     spec_info.cache_clear()
     version_registry = VersionRegistry()
     entry_registry = EntryRegistry()
-    entries = EntryStore(entry_registry, version_registry)
+    entries = EntryStore(entry_registry, analysis.tree_hashes.get, version_registry)
     diagnostics = dict(entry_registry.diagnostics())
     diagnostics['created_entries'] = len(entries)
+    diagnostics['problems'] = analysis.problems
 
     classes = merge_unknown_classes(
-        imported_classes(),
+        source_classes(analysis),
         entry_registry,
-        live_tree_hash,
+        analysis.tree_hashes.get,
         version_registry=version_registry,
         src=version_registry.source_registry,
         trees=version_registry.tree_registry,
     )
 
-    state = AppState(
+    return AppState(
         classes=classes,
         entries=entries,
         diagnostics=diagnostics,
         spec_options=spec_options(entry_registry),
         entry_registry=entry_registry,
         version_registry=version_registry,
+        analysis=analysis,
     )
-    global _active_state
-    _active_state = state
-    return state

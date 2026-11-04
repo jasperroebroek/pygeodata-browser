@@ -1,7 +1,6 @@
 <script lang="ts">
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import {
-    BOOLEAN_TARGETS,
     classesState,
     filterState,
     setFilters,
@@ -65,31 +64,24 @@
     </div>
     <div>
       {#each rows as row, i (i)}
-        {@const isBool = BOOLEAN_TARGETS.has(row.target)}
-        <div class="filter-row" class:filter-row--bool={isBool}>
-          <select
-            value={row.target}
-            style:grid-column={isBool ? '1/-2' : null}
-            onchange={(e) => updateRow(i, { target: e.currentTarget.value })}
-          >
+        <div class="filter-row">
+          <select value={row.target} onchange={(e) => updateRow(i, { target: e.currentTarget.value })}>
             {#each FILTER_TARGETS as [val, label] (val)}
               <option value={val}>{label}</option>
             {/each}
           </select>
-          {#if !isBool}
-            <select value={row.operator} onchange={(e) => updateRow(i, { operator: e.currentTarget.value })}>
-              {#each FILTER_OPERATORS as [val, label] (val)}
-                <option value={val}>{label}</option>
-              {/each}
-            </select>
-            <input
-              bind:this={valueInputs[i]}
-              value={row.value}
-              placeholder="…"
-              autocomplete="off"
-              oninput={(e) => updateRow(i, { value: e.currentTarget.value }, true)}
-            />
-          {/if}
+          <select value={row.operator} onchange={(e) => updateRow(i, { operator: e.currentTarget.value })}>
+            {#each FILTER_OPERATORS as [val, label] (val)}
+              <option value={val}>{label}</option>
+            {/each}
+          </select>
+          <input
+            bind:this={valueInputs[i]}
+            value={row.value}
+            placeholder="…"
+            autocomplete="off"
+            oninput={(e) => updateRow(i, { value: e.currentTarget.value }, true)}
+          />
           <button class="rm-filter-btn" class:fr-clear={i === 0} title={i === 0 ? 'Clear' : 'Remove'} onclick={() => removeRow(i)}>
             ✕
           </button>

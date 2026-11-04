@@ -30,8 +30,6 @@ export interface SpecOption {
   label: string;
 }
 
-export const BOOLEAN_TARGETS = new Set(['has_warnings', 'has_error']);
-
 function stored(key: string): string | null {
   try {
     return localStorage.getItem(key);
@@ -61,7 +59,6 @@ export const ui = $state({
   ready: false,
   loading: true,
   reconciling: false,
-  reimporting: false,
   // Blocking overlay: only a non-fast first load (nothing to show yet). Reloads
   // keep the current state on screen behind the slim progress bar.
   overlay: false,
@@ -69,7 +66,9 @@ export const ui = $state({
   loadError: null as string | null,
   fast: false,
   hasLiveClasses: false,
-  progress: {} as { done?: number; total?: number; reimport_done?: number; reimport_total?: number },
+  mode: 'static' as 'static' | 'import',
+  codeChangedSince: null as number | null,
+  nextImportAt: null as number | null,
   bootstrap: [] as BootstrapRow[],
 });
 
@@ -265,7 +264,7 @@ async function getRetry<T>(url: string): Promise<T> {
 }
 
 function activeFilters(): FilterRow[] {
-  return filterState.filters.filter((f) => BOOLEAN_TARGETS.has(f.target) || f.value.trim() !== '');
+  return filterState.filters.filter((f) => f.value.trim() !== '');
 }
 
 function filterParams(): Record<string, string> {
@@ -723,17 +722,15 @@ export async function selectAdjacentEntry(delta: 1 | -1) {
 // Rebuild / status polling
 // ---------------------------------------------------------------------------
 
-export async function startReload(reimport = false) {
+export async function startReload() {
   try {
-    await api.rebuild(reimport);
+    await api.rebuild();
   } catch (err) {
-    toast(`${reimport ? 'Reimport' : 'Reload'} failed: ${err}`);
+    toast(`Reload failed: ${err}`);
     return;
   }
-  ui.reimporting = reimport;
   ui.loading = true;
   ui.ready = false;
-  ui.progress = {};
   pollStatus();
 }
 
@@ -741,7 +738,6 @@ export async function startReload(reimport = false) {
 export function followServerReload() {
   ui.loading = true;
   ui.ready = false;
-  ui.progress = {};
   pollStatus();
 }
 
@@ -751,7 +747,6 @@ async function onReady() {
   const firstLoad = !ui.ready && classesState.cards.length === 0;
   ui.loading = false;
   ui.ready = true;
-  ui.reimporting = false;
   ui.overlay = false;
   ui.bootstrap = [];
   clearCaches();
@@ -769,6 +764,14 @@ async function onReady() {
   }
 }
 
+function applyStatus(status: StatusPayload) {
+  ui.loadError = status.load_error;
+  ui.hasLiveClasses = status.has_live_classes;
+  ui.mode = status.mode;
+  ui.codeChangedSince = status.code_changed_since;
+  ui.nextImportAt = status.next_import_at;
+}
+
 export function pollStatus() {
   if (statusTimer) clearTimeout(statusTimer);
   const check = async () => {
@@ -778,9 +781,7 @@ export function pollStatus() {
       ui.fast = status.fast;
       if (!ui.statusKnown && !status.fast && !status.ready) ui.overlay = true;
       ui.statusKnown = true;
-      ui.loadError = status.load_error;
-      ui.progress = status.progress ?? {};
-      ui.hasLiveClasses = status.has_live_classes;
+      applyStatus(status);
       if (status.ready) {
         await onReady();
         return;
@@ -823,6 +824,7 @@ function pollIdleVersion() {
       const status: StatusPayload = await api.status();
       const changed = seenVersion !== null && status.version !== seenVersion;
       seenVersion = status.version;
+      applyStatus(status);
       // Only refresh visible data once the initial state is fully built; the
       // loading poll handles transitions into ready.
       if (changed && status.ready && ui.ready) {

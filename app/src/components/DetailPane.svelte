@@ -380,11 +380,6 @@
           {/each}
         {/if}
       </div>
-      {#if e.warnings.length}
-        <div class="entry-warnings">
-          {#each e.warnings as w, i (i)}<div class="entry-warning">⚠ {w}</div>{/each}
-        </div>
-      {/if}
     </div>
 
     {#if e.co_outputs.length}

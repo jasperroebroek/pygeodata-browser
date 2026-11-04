@@ -1,6 +1,5 @@
 <script lang="ts">
   import {
-    BOOLEAN_TARGETS,
     classesState,
     clearAllFilters,
     filterState,
@@ -53,14 +52,13 @@
       });
     }
     filterState.filters.forEach((f, i) => {
-      const isBool = BOOLEAN_TARGETS.has(f.target);
-      if (!isBool && !f.value.trim()) return;
+      if (!f.value.trim()) return;
       const target = FILTER_TARGETS.find(([v]) => v === f.target)?.[1] ?? f.target;
       const op = FILTER_OPERATORS.find(([v]) => v === f.operator)?.[2] ?? f.operator;
       out.push({
         key: `f:${i}`,
-        meta: isBool ? undefined : `${target} ${op}`,
-        label: isBool ? target : f.value,
+        meta: `${target} ${op}`,
+        label: f.value,
         filter: true,
         remove: () =>
           setFilters(

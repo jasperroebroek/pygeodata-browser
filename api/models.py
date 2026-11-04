@@ -43,8 +43,6 @@ class EntryInfo:
     co_output_hashes: list[str] = field(default_factory=list)
     primary_file: FileRef | None = None
     sidecar_files: list[FileRef] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
-    error: str | None = None
     format_version: int = 0
     record_id: str = ''
     dep_hash: str | None = None

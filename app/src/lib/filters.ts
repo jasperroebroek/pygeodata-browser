@@ -6,8 +6,6 @@ export const FILTER_TARGETS: [string, string][] = [
   ['key', 'Key'],
   ['value', 'Value'],
   ['path', 'Path'],
-  ['has_warnings', 'Has warnings'],
-  ['has_error', 'Has error'],
 ];
 
 // [value, word label, pill symbol]

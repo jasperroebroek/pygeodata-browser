@@ -31,9 +31,6 @@ export interface TableRow {
   record_id: string;
   object_type?: ObjectType;
   spec?: SpecPayload;
-  warning_count?: number;
-  warnings?: string[];
-  error?: string;
   focused?: boolean;
   source_stale?: boolean;
   dep_hash_stale?: boolean;
@@ -112,7 +109,6 @@ export interface EntryDetail {
   instance_hash: string;
   class_name: string;
   object_type: ObjectType;
-  warnings: string[];
   dep_hash_stale: boolean;
   format_version_stale: boolean;
   dep_hash: string;
@@ -163,10 +159,13 @@ export interface VersionOption {
 
 export interface StatusPayload {
   ready: boolean;
-  progress: { done?: number; total?: number; reimport_done?: number; reimport_total?: number };
   load_error: string | null;
   version: number;
   has_live_classes: boolean;
+  mode: 'static' | 'import';
+  // epoch seconds; set in import mode while code changed since the last import
+  code_changed_since: number | null;
+  next_import_at: number | null;
   fast: boolean;
 }
 
@@ -270,8 +269,7 @@ export const api = {
   openPath: (path: string) => postJSON('/api/open', { path }),
   revealPath: (path: string) => postJSON('/api/reveal', { path }),
 
-  rebuild: (reimport: boolean) =>
-    postJSON('/api/rebuild', { reimport }),
+  rebuild: () => postJSON('/api/rebuild', {}),
 
   cleanCache: (dryRun: boolean) => postJSON<{ lines: string[]; dry_run: boolean }>('/api/clean-cache', { dry_run: dryRun }),
 

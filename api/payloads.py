@@ -6,37 +6,24 @@ from pygeodata.enums import SpecKeys
 from pygeodata.formatting.json import format_json
 from pygeodata.registries.registry import SourceRegistry
 from pygeodata.registries.versioning import VersionRegistry
-from pygeodata.views.filters import Filter, LogicMode, combine, entry_matches_filter, matching_rows
+from pygeodata.views.filters import Filter, LogicMode, combine, entry_matches_filter, matching_rows, parse_filters
 from pygeodata.views.types import ClassInfo
 from pygeodata_browser.models import EntryInfo, FileRef
 from pygeodata_browser.state import AppState
 
 _LIST_INDEX = re.compile(r'\[\d+\]$')
 
-# Targets about the browser's own entry fields, which pygeodata's filters do not know
-_ENTRY_FLAGS = {
-    'has_warnings': lambda entry: bool(entry.warnings),
-    'has_error': lambda entry: bool(entry.error),
-}
 
-
-def parse_filters(items: list[dict[str, str]] | None) -> list[Filter | str]:
-    return [item['target'] if item.get('target') in _ENTRY_FLAGS else Filter.from_dict(item) for item in items or []]
-
-
-def _entry_matches_filters(entry: EntryInfo, filters: list[Filter | str], logic_mode: str) -> bool:
+def _entry_matches_filters(entry: EntryInfo, filters: list[Filter], logic_mode: str) -> bool:
     if not filters:
         return True
     # EntryInfo carries the class_name, rows and spec.crs the entry filters read
-    matches = [
-        _ENTRY_FLAGS[flt](entry) if isinstance(flt, str) else entry_matches_filter(entry, entry.spec, flt)
-        for flt in filters
-    ]
+    matches = [entry_matches_filter(entry, entry.spec, flt) for flt in filters]
     return combine(matches, LogicMode(logic_mode))
 
 
-def _matching_rows(entry: EntryInfo, filters: list[Filter | str], logic_mode: str) -> list:
-    return matching_rows(entry, [flt for flt in filters if isinstance(flt, Filter)], LogicMode(logic_mode))
+def _matching_rows(entry: EntryInfo, filters: list[Filter], logic_mode: str) -> list:
+    return matching_rows(entry, filters, LogicMode(logic_mode))
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +157,7 @@ def _entry_is_visible(
     selected_classes: list[str],
     kind_filter: str,
     spec_filters: dict,
-    filters: list[Filter | str],
+    filters: list[Filter],
     logic_mode: str,
     hide_stale: bool = False,
     snapshot_filter: list[str] | None = None,
@@ -198,7 +185,7 @@ def _sidebar_counts(
     *,
     kind_filter: str,
     spec_filters: dict,
-    filters: list[Filter | str],
+    filters: list[Filter],
     logic_mode: str,
     hide_stale: bool = False,
     snapshot_filter: list[str] | None = None,
@@ -243,7 +230,7 @@ def _build_visible_groups(
     selected_classes: list[str],
     kind_filter: str,
     spec_filters: dict,
-    filters: list[Filter | str],
+    filters: list[Filter],
     logic_mode: str,
     hide_stale: bool = False,
     snapshot_filter: list[str] | None = None,
@@ -357,7 +344,7 @@ def _build_table_rows(
     visible_groups: list[tuple[str, list[EntryInfo]]],
     classes: dict[str, ClassInfo],
     selected_entry: str | None,
-    filters: list[Filter | str],
+    filters: list[Filter],
     logic_mode: str,
     row_display: str,
 ) -> list[dict]:
@@ -373,9 +360,6 @@ def _build_table_rows(
                     'record_id': entry.record_id,
                     'object_type': entry.object_type,
                     'spec': _spec_payload(entry.spec),
-                    'warning_count': len(entry.warnings),
-                    'warnings': entry.warnings,
-                    'error': entry.error or '',
                     'focused': entry.record_id == selected_entry,
                     'source_stale': ci.source_stale if ci else False,
                     'dep_hash_stale': entry.dep_hash_stale,
@@ -456,7 +440,6 @@ def _entry_detail_payload(entry: EntryInfo, same_instance_runs: list[EntryInfo] 
         'instance_hash': entry.instance_hash,
         'class_name': entry.class_name,
         'object_type': entry.object_type,
-        'warnings': entry.warnings,
         'dep_hash_stale': entry.dep_hash_stale,
         'format_version_stale': entry.format_version_stale,
         'dep_hash': entry.dep_hash,

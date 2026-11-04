@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from conftest import make_analysis
 from pygeodata.catalog.types import LinkedEntry, ParamRow, ParamRowType
 from pygeodata.enums import JSONKeys, SpecKeys
 from pygeodata.views.filters import Filter, FilterTarget
@@ -56,8 +57,6 @@ def make_entry(
     class_name='MyLoader',
     object_type='data',
     rows=None,
-    warnings=None,
-    error=None,
     spec=None,
     state_hash='abc',
     primary_file=None,
@@ -80,8 +79,6 @@ def make_entry(
         spec_hash=spec_hash,
         spec=spec or make_spec(),
         rows=rows or [],
-        warnings=warnings or [],
-        error=error,
         primary_file=primary_file,
         co_outputs=co_outputs or [],
         linked_entries=linked_entries or [],
@@ -141,6 +138,7 @@ def make_state(entries=None, classes=None, groups=None):
         spec_options={},
         entry_registry=_FakeEntryRegistry(groups),
         version_registry=_FakeVersionRegistry(),
+        analysis=make_analysis(),
     )
 
 

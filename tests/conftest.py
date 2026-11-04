@@ -2,7 +2,9 @@ from pathlib import Path
 
 import pytest
 from pygeodata._version import FORMAT_VERSION
+from pygeodata.analysis import ClassRecord, ProjectAnalysis
 from pygeodata.config import set_config
+from pygeodata.dependencies import ClassFacts
 from pygeodata.paths import CachePathConstructor
 from pygeodata.records import EntryRecord
 
@@ -44,3 +46,23 @@ def write_entry(
     ).dump(paths.state_hash_path)
     paths.params_path.write_text('{}')
     return entry_dir
+
+
+def make_analysis(mode: str = 'static', **source_hashes: str) -> ProjectAnalysis:
+    """An analysis of classes named by keyword, each a Data class with the given source hash and no dependencies."""
+    classes = {
+        name: ClassRecord(
+            facts=ClassFacts(
+                name=name,
+                object_type='Data',
+                source_hash=source_hash,
+                call_deps=frozenset(),
+                bases=frozenset(),
+            ),
+            path=f'{name}.py',
+            lineno=1,
+            tree_hash=f'tree-{source_hash}',
+        )
+        for name, source_hash in source_hashes.items()
+    }
+    return ProjectAnalysis(mode=mode, root='.', classes=classes)

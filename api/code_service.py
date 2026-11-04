@@ -8,11 +8,10 @@ from __future__ import annotations
 
 from difflib import SequenceMatcher, unified_diff
 
-from pygeodata.ast import get_source_code
-from pygeodata.hash import calculate_cls_source_hash
+from pygeodata.analysis import ProjectAnalysis
 from pygeodata.paths import CodeRegistryPathConstructor
 from pygeodata.registries.versioning import VersionRegistry
-from pygeodata.tracked_object import TrackedObject
+from pygeodata.static import read_class_source
 from pygeodata.views.types import CodeClassState
 
 
@@ -122,8 +121,8 @@ def _build_structured_hunks(text_old: str, text_new: str) -> list[dict]:
     return hunks
 
 
-def version_classes(version_id: str, vreg: VersionRegistry) -> list[CodeClassState]:
-    """Return per-class CodeState at the given version, annotated with live staleness.
+def version_classes(version_id: str, vreg: VersionRegistry, analysis: ProjectAnalysis) -> list[CodeClassState]:
+    """Return per-class CodeState at the given version, annotated with staleness against the current code.
 
     Pass a Version.version_id to select that group, or '' for the newest group.
     """
@@ -141,9 +140,9 @@ def version_classes(version_id: str, vreg: VersionRegistry) -> list[CodeClassSta
         best = next((s for s in src.get_states(class_name) if s.source_hash == source_hash), None)
         if best is None:
             continue
-        cls = TrackedObject.find_object_class(class_name)
-        is_loaded = cls is not None
-        is_stale = is_loaded and calculate_cls_source_hash(cls) != source_hash
+        current = analysis.classes.get(class_name)
+        is_loaded = current is not None
+        is_stale = is_loaded and current.facts.source_hash != source_hash
         result.append(
             CodeClassState(
                 class_name=class_name,
@@ -156,39 +155,33 @@ def version_classes(version_id: str, vreg: VersionRegistry) -> list[CodeClassSta
     return result
 
 
-def _source_text(source_hash: str, vreg: VersionRegistry) -> tuple[str, str | None] | None:
-    """(source, class_name) for a hash: the stored snapshot, else a loaded class whose code has that hash.
+def _source_text(source_hash: str, vreg: VersionRegistry, analysis: ProjectAnalysis) -> tuple[str, str | None] | None:
+    """(source, class_name) for a hash: the stored snapshot, else the current code of a class with that hash.
 
-    pygeodata stores a class's source only when it runs, so the live code of an
+    pygeodata stores a class's source only when it runs, so the current code of an
     edited-but-not-yet-run class (the 'Live' version) has no stored snapshot.
     """
     src = vreg.source_registry
     text = src.get_source(source_hash)
     if text is not None:
         return text, src.get_class_name_from_hash(source_hash)
-    cls = next((c for c in TrackedObject.get_registered_objects() if _live_source_hash(c) == source_hash), None)
-    return (get_source_code(cls), cls.get_class_name()) if cls is not None else None
+    record = next((r for r in analysis.classes.values() if r.facts.source_hash == source_hash), None)
+    text = read_class_source(record) if record is not None else None
+    return (text, record.facts.name) if text is not None else None
 
 
-def _live_source_hash(cls: type[TrackedObject]) -> str | None:
-    try:
-        return calculate_cls_source_hash(cls)
-    except (OSError, TypeError):  # source unavailable (e.g. defined interactively)
-        return None
-
-
-def snapshot_html(source_hash: str, vreg: VersionRegistry) -> dict | None:
+def snapshot_html(source_hash: str, vreg: VersionRegistry, analysis: ProjectAnalysis) -> dict | None:
     """Return {'class_name': ..., 'lines': [...]} for the given source hash.
 
     Returns None if the snapshot is not found (caller should abort(404)).
     """
     src = vreg.source_registry
-    found = _source_text(source_hash, vreg)
+    found = _source_text(source_hash, vreg, analysis)
     if found is None:
         return None
 
     source_text, class_name = found
-    known_classes = frozenset(TrackedObject._registry.keys()) | frozenset(src.class_names)
+    known_classes = frozenset(analysis.classes) | frozenset(src.class_names)
     lines = [
         {'text': line, 'cls_link': line.strip() if line.strip() in known_classes else None}
         for line in source_text.splitlines()
@@ -196,13 +189,19 @@ def snapshot_html(source_hash: str, vreg: VersionRegistry) -> dict | None:
     return {'class_name': class_name, 'lines': lines}
 
 
-def diff_hashes(hash_old: str, hash_new: str, full: bool, vreg: VersionRegistry) -> dict | None:
+def diff_hashes(
+    hash_old: str,
+    hash_new: str,
+    full: bool,
+    vreg: VersionRegistry,
+    analysis: ProjectAnalysis,
+) -> dict | None:
     """Return structured diff payload or None if either file is missing.
 
     Returns {'hunks': [...], 'full_old'?: str, 'full_new'?: str}.
     """
-    old = _source_text(hash_old, vreg)
-    new = _source_text(hash_new, vreg)
+    old = _source_text(hash_old, vreg, analysis)
+    new = _source_text(hash_new, vreg, analysis)
     if old is None or new is None:
         return None
     text_old, text_new = old[0], new[0]
@@ -220,6 +219,7 @@ def unified_diff_payload(
     full: bool,
     assert_allowed_path: callable,
     vreg: VersionRegistry,
+    analysis: ProjectAnalysis,
 ) -> dict | None:
     """HTTP-boundary wrapper around diff_hashes that enforces the path guard.
 
@@ -229,11 +229,12 @@ def unified_diff_payload(
     """
     assert_allowed_path(str(CodeRegistryPathConstructor.from_source_hash(hash_old).source_path))
     assert_allowed_path(str(CodeRegistryPathConstructor.from_source_hash(hash_new).source_path))
-    return diff_hashes(hash_old, hash_new, full, vreg)
+    return diff_hashes(hash_old, hash_new, full, vreg, analysis)
 
 
 def version_diff(
     vreg: VersionRegistry,
+    analysis: ProjectAnalysis,
     *,
     record_id: str | None = None,
     entries: dict | None = None,
@@ -245,7 +246,7 @@ def version_diff(
     base_version_id is resolved in order:
       1. Explicit base_version_id argument.
       2. The version the entry (record_id) was produced at.
-    target_version_id defaults to 'live' (in-memory/disk current state).
+    target_version_id defaults to 'live' (the project's current code).
     Either base or target may be 'live'.
 
     Returns {changes, base_version_id, has_live_stale} or an error dict.
@@ -254,7 +255,7 @@ def version_diff(
 
     def _resolve(version_id: str) -> dict[str, str] | None:
         if version_id == 'live':
-            return vreg.live_snapshot()
+            return vreg.live_snapshot(analysis.facts.get)
         if version_id == 'none':
             return {}
         return vreg.snapshot_for_version(version_id)
@@ -281,9 +282,9 @@ def version_diff(
     if target is None:
         return {'error': 'no_snapshot', 'message': 'Target version not found'}
 
-    changes = [e.to_dict() for e in vreg.compare_versions(base, target)]
+    changes = [e.to_dict() for e in vreg.compare_versions(base, target, analysis.facts.get)]
     return {
         'changes': changes,
         'base_version_id': resolved_base_id,
-        'has_live_stale': vreg.has_live_stale(),
+        'has_live_stale': vreg.has_live_stale(analysis.facts.get),
     }

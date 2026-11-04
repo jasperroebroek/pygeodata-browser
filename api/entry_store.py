@@ -7,20 +7,27 @@ groups, dep-hash sets, per-class counts) never build it, so the common
 dashboard requests stay on the fast path.
 """
 
+from collections.abc import Callable
+
 from pygeodata._version import FORMAT_VERSION
 from pygeodata.enums import Staleness
 from pygeodata.registries.registry import EntryRegistry
 from pygeodata.registries.versioning import VersionRegistry
 from pygeodata.staleness import dependency_staleness
-from pygeodata.tracked_object import live_tree_hash
 from pygeodata_browser.models import EntryInfo, entry_info
 
 
 class EntryStore:
     """Mapping-like lazy view of the entry registry (state_hash -> EntryInfo)."""
 
-    def __init__(self, entry_registry: EntryRegistry, version_registry: VersionRegistry | None = None):
+    def __init__(
+        self,
+        entry_registry: EntryRegistry,
+        current: Callable[[str], str | None],
+        version_registry: VersionRegistry | None = None,
+    ):
         self._registry = entry_registry
+        self._current = current
         self._vreg = version_registry
         self._records_by_class: dict[str, list] = {}
         self._records_by_id: dict[str, object] = {}
@@ -133,7 +140,7 @@ class EntryStore:
         key = (class_name, dep_hash)
         cached = self._stale_by_dep.get(key)
         if cached is None:
-            cached = dependency_staleness(class_name, dep_hash, live_tree_hash, self._vreg) is Staleness.STALE
+            cached = dependency_staleness(class_name, dep_hash, self._current, self._vreg) is Staleness.STALE
             self._stale_by_dep[key] = cached
         return cached
 

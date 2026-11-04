@@ -118,8 +118,6 @@
             {:else if r.dep_hash_stale}
               <span class="pill-flag pill-flag--warn" title="Dependencies changed — entry may be outdated">stale</span>
             {/if}
-            {#if r.warning_count}<span class="pill-flag pill-flag--warn" title={r.warnings?.join('\n')}>{r.warning_count}⚠</span>{/if}
-            {#if r.error}<span class="pill-flag pill-flag--err" title={r.error}>!</span>{/if}
             <span class="entry-pill-spec">
               {#each specParts(r) as part, j (j)}<span class="tbl-spec-pill">{part}</span>{/each}
             </span>

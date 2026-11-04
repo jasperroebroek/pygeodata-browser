@@ -16,26 +16,13 @@
   import Modal from './components/Modal.svelte';
   import QuickSwitcher from './components/QuickSwitcher.svelte';
   import ReloadBar from './components/ReloadBar.svelte';
+  import StatusNotice from './components/StatusNotice.svelte';
   import { palette } from './lib/palette.svelte';
   import Resizer from './components/Resizer.svelte';
   import CodeView from './views/CodeView.svelte';
   import ExportView from './views/ExportView.svelte';
 
   init();
-
-  const overlayText = $derived.by(() => {
-    const p = ui.progress;
-    const rTotal = p.reimport_total ?? 0;
-    const rDone = p.reimport_done ?? 0;
-    if (rTotal > 0 && rDone < rTotal) {
-      return { label: 'Reimporting…', sub: `${rDone} / ${rTotal} files`, pct: Math.round((rDone / rTotal) * 100) };
-    }
-    if (p.total) {
-      return { label: 'Loading entries…', sub: `${p.done ?? 0} / ${p.total}`, pct: Math.round(((p.done ?? 0) / p.total) * 100) };
-    }
-    if (rTotal > 0) return { label: 'Reimporting…', sub: 'Done — scanning entries…', pct: 100 };
-    return { label: ui.reimporting ? 'Reimporting…' : 'Loading entries…', sub: '', pct: 0 };
-  });
 
   // Select mode is always on in the export view (its +/− icons remove entries).
   $effect(() => {
@@ -103,14 +90,15 @@
 
 <Modal />
 
+<StatusNotice />
+
 {#if palette.open}<QuickSwitcher />{/if}
 
 {#if ui.loading && ui.overlay}
   <div class="loading-overlay">
     <div class="loading-box">
-      <div class="loading-label">{overlayText.label}</div>
-      <div class="loading-bar-track"><div class="loading-bar-fill" style:width="{overlayText.pct}%"></div></div>
-      <div class="loading-sub">{ui.loadError ?? overlayText.sub}</div>
+      <div class="loading-label">Loading entries…</div>
+      {#if ui.loadError}<div class="loading-sub">{ui.loadError}</div>{/if}
     </div>
   </div>
 {/if}
