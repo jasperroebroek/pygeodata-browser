@@ -55,7 +55,9 @@
     role="presentation"
     onclick={(e) => e.target === e.currentTarget && closeModal()}
   >
-    <div class="modal-card" class:modal-card--sm={current.size === 'sm'} class:modal-card--md={current.size === 'md'}>
+    <div class="modal-card" class:modal-card--sm={current.size === 'sm'} class:modal-card--md={current.size === 'md'}
+      class:modal-card--lg={current.size === 'lg'}
+    >
       <div class="modal-bar">
         <span class="modal-title">{current.title}</span>
         <button class="modal-close" onclick={closeModal}>✕</button>

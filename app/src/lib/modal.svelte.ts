@@ -10,7 +10,7 @@ export type ModalContent =
 
 export interface ModalState {
   title: string;
-  size: '' | 'sm' | 'md';
+  size: '' | 'sm' | 'md' | 'lg';
   content: ModalContent;
 }
 

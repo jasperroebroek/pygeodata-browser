@@ -194,11 +194,24 @@ export interface CatalogInfo {
   unavailable_roots: UnavailableRoot[];
 }
 
+export interface Diagnostics {
+  entries: number;
+  created_entries: number;
+  unindexed_dirs: number;
+  /** why the dirs are not indexed; null when unknown (a read-only mirror never reads them) */
+  unindexed_reasons: { other_format: number; no_meta: number; unreadable: number } | null;
+  missing_dirs: number;
+  offline_entries: number;
+  stale_hidden: number;
+  /** static analysis problems */
+  problems: string[];
+}
+
 export interface ClassesPayload {
   class_cards: ClassCard[];
   spec_options: Record<string, (string | { value: string; label: string })[]>;
   version_options: VersionOption[];
-  diagnostics: Record<string, number>;
+  diagnostics: Diagnostics;
   catalog: CatalogInfo;
   counts: {
     classes: number;

@@ -4,6 +4,7 @@ import type {
   BootstrapRow,
   ClassCard,
   CatalogInfo,
+  Diagnostics,
   ClassesPayload,
   DetailPayload,
   EntriesPagePayload,
@@ -115,7 +116,7 @@ export const classesState = $state({
   specOptions: {} as Record<string, (string | SpecOption)[]>,
   versionOptions: [] as VersionOption[],
   counts: null as ClassesPayload['counts'] | null,
-  diagnostics: {} as Record<string, number>,
+  diagnostics: {} as Partial<Diagnostics>,
   catalog: null as CatalogInfo | null,
 });
 

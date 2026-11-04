@@ -46,7 +46,7 @@
         role="menuitem"
         disabled={!ui.hasLiveClasses || readOnly}
         title={readOnly ? readOnlyTitle : undefined}
-        onclick={() => run(() => openModal('Clean Cache', { kind: 'clean', target: 'cache' }, 'md'))}
+        onclick={() => run(() => openModal('Clean Cache', { kind: 'clean', target: 'cache' }, 'lg'))}
       >
         Clean cache…
       </button>
@@ -55,7 +55,7 @@
         role="menuitem"
         disabled={!ui.hasLiveClasses || readOnly}
         title={readOnly ? readOnlyTitle : undefined}
-        onclick={() => run(() => openModal('Clean Source Registry', { kind: 'clean', target: 'source' }, 'md'))}
+        onclick={() => run(() => openModal('Clean Source Registry', { kind: 'clean', target: 'source' }, 'lg'))}
       >
         Clean registry…
       </button>

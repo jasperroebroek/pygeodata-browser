@@ -379,8 +379,15 @@
   max-height: min(88vh, 700px);
 }
 
-/* Medium variant — wider compact modal, e.g. clean-cache terminal */
+/* Medium variant — fits label/value content, e.g. diagnostics */
 .modal-card--md {
+  width: min(780px, 94vw);
+  height: auto;
+  max-height: min(88vh, 960px);
+}
+
+/* Large variant — long paths and terminal output, e.g. clean-cache */
+.modal-card--lg {
   width: 65vw;
   height: auto;
 }
@@ -543,63 +550,6 @@
   font-size: 11px;
   color: var(--faint);
 }
-
-/* ------------------------------------------------------------
-   Diagnostics modal
-   ------------------------------------------------------------ */
-
-.diag-table {
-  width: 100%;
-  table-layout: fixed;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-/* Section header rows — uppercase label spanning both columns */
-.diag-table tr.diag-section-row td {
-  padding: 18px 0 5px;
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .07em;
-  color: var(--faint);
-  border-bottom: 1px solid var(--border-s);
-}
-
-.diag-table tr.diag-section-row:first-child td {
-  padding-top: 4px;
-}
-
-/* Data rows */
-.diag-table .diag-label {
-  padding: 6px 16px 6px 0;
-  color: var(--muted);
-  vertical-align: middle;
-}
-
-.diag-table .diag-val {
-  padding: 6px 0;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
-  vertical-align: middle;
-}
-
-.diag-table .diag-val--text {
-  text-align: left;
-  font-weight: 400;
-  white-space: normal;
-  text-overflow: clip;
-  overflow-wrap: anywhere;
-}
-
-/* Warning highlight — shown when a count is > 0 */
-.diag-table tr.diag-warn .diag-label,
-.diag-table tr.diag-warn .diag-val {
-  color: var(--warn);
-}
-
-
 
 /* ------------------------------------------------------------
    Toast

@@ -28,3 +28,12 @@ const FILE_TONES: Record<string, FileTone> = { raster: 'data', table: 'table', i
 
 /** Colour family for a file-kind pill (kinds come from pygeodata's classify_file). */
 export const fileTone = (kind: string): FileTone => FILE_TONES[kind] ?? 'neutral';
+
+/** "just now", "5 min ago", "3 h ago", "2 d ago" */
+export function relativeTime(epochSeconds: number, nowSeconds = Date.now() / 1000): string {
+  const seconds = Math.max(0, nowSeconds - epochSeconds);
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} h ago`;
+  return `${Math.floor(seconds / 86400)} d ago`;
+}

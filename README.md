@@ -46,9 +46,11 @@ browsed on the laptop without ever writing into the mirror. The browser is **rea
 ("mirror mode") when the catalog's `writer.root` differs from the local project root (the
 rule of `pygeodata.catalog.store.open_catalog`) or when `catalog_enabled` is False;
 `pygeodata browse --read-only` / `--writable` override the detection. The mode and why
-are listed in the Activity panel (registry diagnostics), together with the writer's root,
-host, versions and time, the `catalog_id`, the local paths below, and the count of entries
-with absolute dir paths.
+are shown at the top of the registry diagnostics, together with a health checklist
+(unindexed entry dirs with the reason for each kind, missing dirs, unavailable cache roots,
+offline entries, analysis problems, entries with absolute dir paths) and the catalog details:
+the writer's root, host, versions and time, the `catalog_id` and the local paths below. A
+mirror never reads entry dirs, so it cannot say why dirs are unindexed.
 
 In mirror mode:
 
