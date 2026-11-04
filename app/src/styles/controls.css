@@ -700,10 +700,6 @@
   transition: width .25s ease;
 }
 
-.loading-sub {
-  font-size: 11px;
-  color: var(--faint);
-}
 
 
 /* Native selects look different in Safari; draw them the same everywhere */

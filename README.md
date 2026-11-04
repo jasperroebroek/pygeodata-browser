@@ -25,7 +25,7 @@ The **Reload** button re-runs the startup mode's analysis and rebuilds the state
 once. Every 10 s the server stats the project's files (`iter_project_files`; mtimes
 only). In static mode a change is re-analysed immediately. In import mode it is only
 noted: the UI keeps showing the last import with *Code changed since the last import
-— next import at HH:MM · Reload now*, and the subprocess runs at the next
+— next import at HH:MM · Reload*, and the subprocess runs at the next
 `--reconcile-interval` tick (default 5 min), once however many edits there were. The
 same tick rebuilds the state when the catalog file changed. A failed analysis keeps
 the last good state and surfaces the error in the UI; unparsable files and duplicate
