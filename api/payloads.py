@@ -1,14 +1,35 @@
+import json
 import re
+from dataclasses import replace
 from pathlib import Path
 
-from pygeodata.catalog.types import LinkedEntry, ParamRowType
+from pygeodata.catalog.types import LinkedEntry, ParamRow, ParamRowType
 from pygeodata.enums import SpecKeys
 from pygeodata.formatting.json import format_json
 from pygeodata.registries.registry import SourceRegistry
 from pygeodata.registries.versioning import VersionRegistry
 from pygeodata.views.filters import Filter, LogicMode, combine, entry_matches_filter, matching_rows, parse_filters
 from pygeodata.views.types import ClassInfo
-from pygeodata_browser.models import EntryInfo, FileRef
+from pygeodata_browser.contracts import (
+    ClassCard,
+    ClassesPayload,
+    CodeVersionEntry,
+    CoOutput,
+    Counts,
+    DepVersionSibling,
+    DetailPayload,
+    DetailRow,
+    EntriesPage,
+    EntryDetail,
+    EntryIds,
+    EntryRef,
+    HeaderRow,
+    LinkedEntryPayload,
+    ParamRowPayload,
+    SameInstanceRun,
+    VersionOption,
+)
+from pygeodata_browser.models import EntryInfo
 from pygeodata_browser.state import AppState
 
 _LIST_INDEX = re.compile(r'\[\d+\]$')
@@ -22,7 +43,7 @@ def _entry_matches_filters(entry: EntryInfo, filters: list[Filter], logic_mode: 
     return combine(matches, LogicMode(logic_mode))
 
 
-def _matching_rows(entry: EntryInfo, filters: list[Filter], logic_mode: str) -> list:
+def _matching_rows(entry: EntryInfo, filters: list[Filter], logic_mode: str) -> list[ParamRow]:
     return matching_rows(entry, filters, LogicMode(logic_mode))
 
 
@@ -31,32 +52,24 @@ def _matching_rows(entry: EntryInfo, filters: list[Filter], logic_mode: str) -> 
 # ---------------------------------------------------------------------------
 
 
-def _row_payload(row) -> dict:
-    return {
-        'group': row.key_group,
-        'parameter': row.final_key,
-        'value': row.value_text,
-        'value_type': row.value_type,
-        'param_row_type': row.row_type,
-        'path': row.path,
-        'depth': row.depth,
-    }
+def _row_payload(row: ParamRow) -> ParamRowPayload:
+    return ParamRowPayload(
+        group=row.key_group,
+        parameter=row.final_key,
+        value=row.value_text,
+        value_type=row.value_type,
+        param_row_type=row.row_type,
+        path=row.path,
+        depth=row.depth,
+    )
 
 
-def _file_payload(file_ref: FileRef) -> dict:
-    return {
-        'label': file_ref.label,
-        'path': file_ref.path,
-        'kind': file_ref.kind,
-    }
-
-
-def _linked_entries_payload(entry: EntryInfo) -> list[dict]:
+def _linked_entries_payload(entry: EntryInfo) -> list[LinkedEntryPayload]:
     claimed: set[int] = set()
     return [_linked_entry_payload(le, entry, claimed) for le in entry.linked_entries]
 
 
-def _linked_entry_payload(le: LinkedEntry, entry: EntryInfo, claimed: set[int]) -> dict:
+def _linked_entry_payload(le: LinkedEntry, entry: EntryInfo, claimed: set[int]) -> LinkedEntryPayload:
     """The linked entry's params are flattened into the parent's rows under the
     link's own scope — derive the summary from those, nothing is stored.
 
@@ -92,24 +105,12 @@ def _linked_entry_payload(le: LinkedEntry, entry: EntryInfo, claimed: set[int]) 
             values = summary.setdefault(key, [])
             if key.endswith('[]') or not values:
                 values.append(row.value_text)
-    return {
-        'param_name': le.param_name,
-        'class_name': le.class_name,
-        'state_hash': le.state_hash,
-        'params_summary': summary,
-    }
-
-
-def _spec_payload(spec) -> dict:
-    return {
-        'crs': spec.crs,
-        'resolution': spec.resolution,
-        'resolution_display': spec.resolution_display,
-        'shape': spec.shape,
-        'bounds': spec.bounds,
-        'bounds_latlon': spec.bounds_latlon,
-        'bounds_display': spec.bounds_display,
-    }
+    return LinkedEntryPayload(
+        param_name=le.param_name,
+        class_name=le.class_name,
+        state_hash=le.state_hash,
+        params_summary=summary,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -293,7 +294,7 @@ def _build_class_cards(
     sidebar_counts: dict[str, int],
     selected_classes: list[str],
     snapshot_dep_hashes: set[str] | None = None,
-) -> list[dict]:
+) -> list[ClassCard]:
     # When a snapshot filter is active, derive stale status from the visible entries:
     # a class is stale if any of its snapshot entries have dep_hash_stale=True.
     snapshot_stale_classes: set[str] = set()
@@ -320,19 +321,19 @@ def _build_class_cards(
             source_stale = class_info.source_stale
             deps_stale = class_info.deps_stale
         class_cards.append(
-            {
-                'class_name': class_name,
-                'object_type': class_info.object_type,
-                'loaded': class_info.known,
-                'call_dependency_names': class_info.call_dependency_names,
-                'inheritance_dependency_names': class_info.inheritance_dependency_names,
-                'total_record_count': len(record_ids),
-                'visible_record_count': sidebar_counts.get(class_name, 0),
-                'selected': class_name in selected_classes,
-                'source_stale': source_stale,
-                'deps_stale': deps_stale,
-                'format_version_stale': format_version_stale,
-            },
+            ClassCard(
+                class_name=class_name,
+                object_type=class_info.object_type,
+                loaded=class_info.known,
+                call_dependency_names=class_info.call_dependency_names,
+                inheritance_dependency_names=class_info.inheritance_dependency_names,
+                total_record_count=len(record_ids),
+                visible_record_count=sidebar_counts.get(class_name, 0),
+                selected=class_name in selected_classes,
+                source_stale=source_stale,
+                deps_stale=deps_stale,
+                format_version_stale=format_version_stale,
+            ),
         )
     return class_cards
 
@@ -345,26 +346,25 @@ def _build_table_rows(
     filters: list[Filter],
     logic_mode: str,
     row_display: str,
-) -> list[dict]:
-    table_rows: list[dict] = []
+) -> list[HeaderRow | DetailRow]:
+    table_rows: list[HeaderRow | DetailRow] = []
 
     for class_name, group_entries in visible_groups:
         ci = classes.get(class_name)
         for entry in group_entries:
             table_rows.append(
-                {
-                    'row_type': 'header',
-                    'class_name': class_name,
-                    'record_id': entry.record_id,
-                    'object_type': entry.object_type,
-                    'spec': _spec_payload(entry.spec),
-                    'focused': entry.record_id == selected_entry,
-                    'source_stale': ci.source_stale if ci else False,
-                    'dep_hash_stale': entry.dep_hash_stale,
-                    'format_version_stale': entry.format_version_stale,
-                    'offline_root': entry.offline_root,
-                    'dep_hash': entry.dep_hash,
-                },
+                HeaderRow(
+                    class_name=class_name,
+                    record_id=entry.record_id,
+                    object_type=entry.object_type,
+                    spec=entry.spec,
+                    focused=entry.record_id == selected_entry,
+                    source_stale=ci.source_stale if ci else False,
+                    dep_hash_stale=entry.dep_hash_stale,
+                    format_version_stale=entry.format_version_stale,
+                    offline_root=entry.offline_root,
+                    dep_hash=entry.dep_hash,
+                ),
             )
 
             if row_display == 'all':
@@ -376,99 +376,75 @@ def _build_table_rows(
 
             for row in detail_rows:
                 table_rows.append(
-                    {
-                        'row_type': 'detail',
-                        'class_name': class_name,
-                        'record_id': entry.record_id,
-                        **_row_payload(row),
-                    },
+                    DetailRow(**vars(_row_payload(row)), class_name=class_name, record_id=entry.record_id),
                 )
 
     return table_rows
 
 
-def _class_detail_payload(class_info: ClassInfo) -> dict:
-    return {
-        'class_name': class_info.class_name,
-        'object_type': class_info.object_type,
-        'loaded': class_info.known,
-        'call_dependency_names': class_info.call_dependency_names,
-        'inheritance_dependency_names': class_info.inheritance_dependency_names,
-        'source_available': bool(class_info.class_source_path),
-        'graph_available': bool(class_info.class_graph_path),
-        'class_source_path': class_info.class_source_path,
-        'class_graph_path': class_info.class_graph_path,
-        'class_registry_path': class_info.class_registry_path,
-        'class_tree_path': class_info.class_tree_path,
-        'source_stale': class_info.source_stale,
-        'deps_stale': class_info.deps_stale,
-    }
-
-
-def _co_output_diff_rows(co_entry: EntryInfo, main_entry: EntryInfo) -> list[dict]:
+def _co_output_diff_rows(co_entry: EntryInfo, main_entry: EntryInfo) -> list[ParamRowPayload]:
     main_by_path = {r.path: r.value_text for r in main_entry.rows}
     return [_row_payload(r) for r in co_entry.rows if main_by_path.get(r.path) != r.value_text]
 
 
-def _co_output_payload(entry: EntryInfo, main_entry: EntryInfo) -> dict:
-    return {
-        'record_id': entry.record_id,
-        'class_name': entry.class_name,
-        'object_type': entry.object_type,
-        'state_hash': entry.state_hash,
-        'offline': entry.offline,
-        'primary_file': _file_payload(entry.primary_file) if entry.primary_file else None,
-        'rows': [_row_payload(r) for r in entry.rows],
-        'diff_rows': _co_output_diff_rows(entry, main_entry),
-    }
+def _co_output_payload(entry: EntryInfo, main_entry: EntryInfo) -> CoOutput:
+    return CoOutput(
+        record_id=entry.record_id,
+        class_name=entry.class_name,
+        object_type=entry.object_type,
+        state_hash=entry.state_hash,
+        offline=entry.offline,
+        primary_file=entry.primary_file,
+        rows=[_row_payload(r) for r in entry.rows],
+        diff_rows=_co_output_diff_rows(entry, main_entry),
+    )
 
 
-def _same_instance_run_payload(sibling: EntryInfo) -> dict:
-    return {
-        'record_id': sibling.record_id,
-        'class_name': sibling.class_name,
-        'state_hash': sibling.state_hash,
-        'offline': sibling.offline,
-        'primary_file': _file_payload(sibling.primary_file) if sibling.primary_file else None,
-        'spec': _spec_payload(sibling.spec),
-    }
+def _same_instance_run_payload(sibling: EntryInfo) -> SameInstanceRun:
+    return SameInstanceRun(
+        record_id=sibling.record_id,
+        class_name=sibling.class_name,
+        state_hash=sibling.state_hash,
+        offline=sibling.offline,
+        primary_file=sibling.primary_file,
+        spec=sibling.spec,
+    )
 
 
-def _entry_detail_payload(entry: EntryInfo, same_instance_runs: list[EntryInfo] | None = None) -> dict:
-    return {
-        'record_id': entry.record_id,
-        'state_hash': entry.state_hash,
-        'instance_hash': entry.instance_hash,
-        'class_name': entry.class_name,
-        'object_type': entry.object_type,
-        'dep_hash_stale': entry.dep_hash_stale,
-        'format_version_stale': entry.format_version_stale,
-        'offline_root': entry.offline_root,
-        'dep_hash': entry.dep_hash,
-        'params_path': entry.params_path,
-        'state_hash_path': entry.state_hash_path,
-        'execution_graph_path': entry.execution_graph_path,
-        'spec': _spec_payload(entry.spec),
-        'primary_file': _file_payload(entry.primary_file) if entry.primary_file else None,
-        'sidecar_files': [_file_payload(f) for f in entry.sidecar_files],
-        'figure_preview': entry.primary_file.path
-        if entry.primary_file and entry.primary_file.kind == 'image' and not entry.offline
-        else None,
-        'table_preview': entry.primary_file.path
-        if entry.primary_file and entry.primary_file.kind == 'table' and not entry.offline
-        else None,
-        'co_outputs': [_co_output_payload(e, entry) for e in entry.co_outputs],
-        'same_instance_runs': [_same_instance_run_payload(s) for s in (same_instance_runs or [])],
-        'rows': [_row_payload(r) for r in entry.rows],
-        'params_tree': format_json(_params_tree(entry)),
-        'linked_entries': _linked_entries_payload(entry),
-    }
+def _preview_path(entry: EntryInfo, kind: str) -> str | None:
+    file = entry.primary_file
+    return file.path if file and file.kind == kind and not entry.offline else None
+
+
+def _entry_detail_payload(entry: EntryInfo, same_instance_runs: list[EntryInfo]) -> EntryDetail:
+    return EntryDetail(
+        record_id=entry.record_id,
+        state_hash=entry.state_hash,
+        instance_hash=entry.instance_hash,
+        class_name=entry.class_name,
+        object_type=entry.object_type,
+        dep_hash_stale=entry.dep_hash_stale,
+        format_version_stale=entry.format_version_stale,
+        offline_root=entry.offline_root,
+        dep_hash=entry.dep_hash,
+        params_path=entry.params_path,
+        state_hash_path=entry.state_hash_path,
+        execution_graph_path=entry.execution_graph_path,
+        spec=entry.spec,
+        primary_file=entry.primary_file,
+        sidecar_files=entry.sidecar_files,
+        figure_preview=_preview_path(entry, 'image'),
+        table_preview=_preview_path(entry, 'table'),
+        co_outputs=[_co_output_payload(e, entry) for e in entry.co_outputs],
+        same_instance_runs=[_same_instance_run_payload(s) for s in same_instance_runs],
+        rows=[_row_payload(r) for r in entry.rows],
+        params_tree=format_json(_params_tree(entry)),
+        linked_entries=_linked_entries_payload(entry),
+    )
 
 
 def _params_tree(entry: EntryInfo) -> dict:
     """The raw params tree — read from disk on demand, never during import."""
-    import json
-
     path = Path(entry.params_path)
     if not path.exists():
         return {}
@@ -478,20 +454,25 @@ def _params_tree(entry: EntryInfo) -> dict:
         return {}
 
 
-def _dep_version_sibling_payload(entry: EntryInfo, vreg: VersionRegistry, *, is_self: bool = False) -> dict:
+def _dep_version_sibling_payload(
+    entry: EntryInfo,
+    vreg: VersionRegistry,
+    *,
+    is_self: bool = False,
+) -> DepVersionSibling:
     version = vreg.version_for_dep_hash(entry.dep_hash) if entry.dep_hash else None
-    return {
-        'record_id': entry.record_id,
-        'dep_hash': entry.dep_hash,
-        'dep_hash_stale': entry.dep_hash_stale,
-        'version_id': version.version_id if version else None,
-        'version_label': vreg.label(version) if version else None,
-        'is_self': is_self,
-        'spec': _spec_payload(entry.spec),
-    }
+    return DepVersionSibling(
+        record_id=entry.record_id,
+        dep_hash=entry.dep_hash,
+        dep_hash_stale=entry.dep_hash_stale,
+        version_id=version.version_id if version else None,
+        version_label=vreg.label(version) if version else None,
+        is_self=is_self,
+        spec=entry.spec,
+    )
 
 
-def version_groups_payload(vreg: VersionRegistry, entry_dep_hashes: set[str] | None = None) -> list[dict]:
+def version_groups_payload(vreg: VersionRegistry, entry_dep_hashes: set[str] | None = None) -> list[VersionOption]:
     """Serialize VersionRegistry.versions for the browser API.
 
     entry_dep_hashes: the set of dep_hashes from live entries.  When provided,
@@ -508,94 +489,76 @@ def version_groups_payload(vreg: VersionRegistry, entry_dep_hashes: set[str] | N
         version_has_entries = {v.version_id: True for v in vreg.versions}
 
     return [
-        {
-            'version_id': vi.version_id,
-            'mtime': vi.mtime,
-            'label': vreg.label(vi),
-            'class_names': vi.class_names,
-            'changed_class_names': vi.changed_class_names,
-            'has_entries': version_has_entries.get(vi.version_id, False),
-        }
+        VersionOption(
+            version_id=vi.version_id,
+            mtime=vi.mtime,
+            label=vreg.label(vi),
+            class_names=vi.class_names,
+            changed_class_names=vi.changed_class_names,
+            has_entries=version_has_entries.get(vi.version_id, False),
+        )
         for vi in vreg.versions
     ]
 
 
-def _class_version_history(class_name: str, src: SourceRegistry) -> list[dict]:
-    """Return code versions for a class sorted oldest-first.
-
-    Each entry: {source_hash, mtime, is_version_change}.
-    """
-    states = src.get_states(class_name)
+def _class_version_history(class_name: str, src: SourceRegistry) -> list[CodeVersionEntry]:
+    """Return code versions for a class sorted oldest-first."""
     return [
-        {'source_hash': s.source_hash, 'mtime': s.registered_at, 'is_version_change': src.is_version_change(s)}
-        for s in states
+        CodeVersionEntry(
+            source_hash=s.source_hash,
+            mtime=s.registered_at,
+            is_version_change=src.is_version_change(s),
+        )
+        for s in src.get_states(class_name)
     ]
 
 
-def _build_detail_payload(
-    *,
-    state: AppState,
-    selected_entry_info: EntryInfo | None,
-    selected_classes: list[str],
-    vreg: VersionRegistry,
-) -> dict | None:
-    src = vreg.source_registry
-    if selected_entry_info is not None:
-        class_info = state.classes.get(selected_entry_info.class_name)
-        if class_info is None:
-            return None
-        siblings: list[EntryInfo] = []
-        if selected_entry_info.instance_hash:
-            sibling_ids = sorted(
-                rid
-                for rid in state.entries.ids_by_instance_hash(selected_entry_info.instance_hash)
-                if rid != selected_entry_info.record_id
-            )
-            siblings = [state.entries.get(rid) for rid in sibling_ids if rid in state.entries]
-        dep_version_entries: list[EntryInfo] = []
-        if selected_entry_info.params_hash and selected_entry_info.spec_hash:
-            dep_ids = sorted(
-                state.entries.ids_by_params_hash(
-                    selected_entry_info.class_name,
-                    selected_entry_info.params_hash,
-                    selected_entry_info.spec_hash,
-                ),
-            )
-            dep_version_entries = [state.entries.get(rid) for rid in dep_ids if rid in state.entries]
-            dep_version_entries.sort(
-                key=lambda e: (
-                    vreg.version_for_dep_hash(e.dep_hash).mtime
-                    if e.dep_hash and vreg.version_for_dep_hash(e.dep_hash)
-                    else ''
-                ),
-                reverse=True,
-            )
-        entry_version = (
-            vreg.version_for_dep_hash(selected_entry_info.dep_hash) if selected_entry_info.dep_hash else None
+def _build_detail_payload(*, state: AppState, entry: EntryInfo) -> DetailPayload | None:
+    class_info = state.classes.get(entry.class_name)
+    if class_info is None:
+        return None
+    vreg = state.version_registry
+    siblings: list[EntryInfo] = []
+    if entry.instance_hash:
+        sibling_ids = sorted(
+            rid for rid in state.entries.ids_by_instance_hash(entry.instance_hash) if rid != entry.record_id
         )
-        return {
-            **_class_detail_payload(class_info),
-            'code_versions': _class_version_history(selected_entry_info.class_name, src),
-            'entry_version_id': entry_version.version_id if entry_version else None,
-            'entry_version_label': vreg.label(entry_version) if entry_version else None,
-            'dep_version_siblings': [
-                _dep_version_sibling_payload(e, vreg, is_self=e.record_id == selected_entry_info.record_id)
-                for e in dep_version_entries
-            ],
-            'selected_entry': _entry_detail_payload(selected_entry_info, same_instance_runs=siblings),
-        }
-
-    if len(selected_classes) == 1:
-        class_info = state.classes.get(selected_classes[0])
-        if class_info is not None:
-            return {
-                **_class_detail_payload(class_info),
-                'code_versions': _class_version_history(selected_classes[0], src),
-                'entry_version_id': None,
-                'selected_entry': None,
-            }
-
-    return None
+        siblings = [state.entries.get(rid) for rid in sibling_ids if rid in state.entries]
+    dep_version_entries: list[EntryInfo] = []
+    if entry.params_hash and entry.spec_hash:
+        dep_ids = sorted(state.entries.ids_by_params_hash(entry.class_name, entry.params_hash, entry.spec_hash))
+        dep_version_entries = [state.entries.get(rid) for rid in dep_ids if rid in state.entries]
+        dep_version_entries.sort(
+            key=lambda e: (
+                vreg.version_for_dep_hash(e.dep_hash).mtime
+                if e.dep_hash and vreg.version_for_dep_hash(e.dep_hash)
+                else ''
+            ),
+            reverse=True,
+        )
+    entry_version = vreg.version_for_dep_hash(entry.dep_hash) if entry.dep_hash else None
+    return DetailPayload(
+        class_name=class_info.class_name,
+        object_type=class_info.object_type,
+        loaded=class_info.known,
+        call_dependency_names=class_info.call_dependency_names,
+        inheritance_dependency_names=class_info.inheritance_dependency_names,
+        source_available=bool(class_info.class_source_path),
+        graph_available=bool(class_info.class_graph_path),
+        class_source_path=class_info.class_source_path,
+        class_graph_path=class_info.class_graph_path,
+        class_registry_path=class_info.class_registry_path,
+        class_tree_path=class_info.class_tree_path,
+        source_stale=class_info.source_stale,
+        deps_stale=class_info.deps_stale,
+        code_versions=_class_version_history(entry.class_name, vreg.source_registry),
+        entry_version_id=entry_version.version_id if entry_version else None,
+        entry_version_label=vreg.label(entry_version) if entry_version else None,
+        dep_version_siblings=[
+            _dep_version_sibling_payload(e, vreg, is_self=e.record_id == entry.record_id) for e in dep_version_entries
+        ],
+        selected_entry=_entry_detail_payload(entry, siblings),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -624,7 +587,7 @@ def build_classes_payload(
     hide_stale: bool = False,
     offline_filter: str = 'all',
     version_filter: str | None = None,
-) -> dict:
+) -> ClassesPayload:
     vreg = state.version_registry
     parsed_filters = parse_filters(filters or [])
     spec_filters = spec_filters or {}
@@ -651,25 +614,25 @@ def build_classes_payload(
     else:
         stale_hidden = 0
 
-    return {
-        'class_cards': _build_class_cards(
+    return ClassesPayload(
+        class_cards=_build_class_cards(
             state,
             sidebar_counts=sidebar_counts,
             selected_classes=[],
             snapshot_dep_hashes=dep_hash_set,
         ),
-        'spec_options': state.spec_options,
-        'version_options': version_groups_payload(vreg),
-        'diagnostics': {**state.diagnostics, 'stale_hidden': stale_hidden},
-        'catalog': state.catalog.payload(),
-        'counts': {
-            'classes': len(state.classes),
-            'classes_loaded': sum(1 for c in state.classes.values() if c.known),
-            'entries': len(state.entries),
-            'visible_classes': len(sidebar_counts),
-            'visible_entries': sum(sidebar_counts.values()),
-        },
-    }
+        spec_options=state.spec_options,
+        version_options=version_groups_payload(vreg),
+        diagnostics=replace(state.diagnostics, stale_hidden=stale_hidden),
+        catalog=state.catalog.info(),
+        counts=Counts(
+            classes=len(state.classes),
+            classes_loaded=sum(1 for c in state.classes.values() if c.known),
+            entries=len(state.entries),
+            visible_classes=len(sidebar_counts),
+            visible_entries=sum(sidebar_counts.values()),
+        ),
+    )
 
 
 def build_entries_page_payload(
@@ -690,7 +653,7 @@ def build_entries_page_payload(
     ids_only: bool = False,
     max_rows: int | None = None,
     only_ids: set[str] | None = None,
-) -> dict:
+) -> EntriesPage | EntryIds:
     """One page of visible header rows across the selected classes.
 
     ``only_ids`` further restricts the result to those entries (the pinned view).
@@ -717,7 +680,7 @@ def build_entries_page_payload(
             object_type_by_class={name: ci.object_type for name, ci in state.classes.items()},
             offline_filter=offline_filter,
         )
-        return {'ids': ids, 'total': len(ids)}
+        return EntryIds(ids=ids, total=len(ids))
 
     visible_groups = _build_visible_groups(
         state,
@@ -738,7 +701,7 @@ def build_entries_page_payload(
     ]
     total = len(entries)
     if ids_only:
-        return {'ids': [e.record_id for _, e in entries], 'total': total}
+        return EntryIds(ids=[e.record_id for _, e in entries], total=total)
     offset = max(offset, 0)
     limit = max(min(limit, 500), 1)
     page = entries[offset : offset + limit]
@@ -757,8 +720,8 @@ def build_entries_page_payload(
         else:
             page_groups.append((class_name, [e]))
 
-    return {
-        'table_rows': _build_table_rows(
+    return EntriesPage(
+        table_rows=_build_table_rows(
             visible_groups=page_groups,
             classes=state.classes,
             selected_entry=selected_entry,
@@ -766,41 +729,32 @@ def build_entries_page_payload(
             logic_mode=logic_mode,
             row_display=row_display,
         ),
-        'total': total,
-        'offset': offset,
-        'limit': limit,
-    }
-
-
-def build_entry_detail_payload(state: AppState, *, record_id: str) -> dict | None:
-    entry = state.entries.get(record_id)
-    if entry is None:
-        return None
-    return _build_detail_payload(
-        state=state,
-        selected_entry_info=entry,
-        selected_classes=[entry.class_name],
-        vreg=state.version_registry,
+        total=total,
+        offset=offset,
+        limit=limit,
     )
 
 
-def _entry_ref(state: AppState, record_id: str) -> dict:
+def build_entry_detail_payload(state: AppState, *, record_id: str) -> DetailPayload | None:
+    entry = state.entries.get(record_id)
+    if entry is None:
+        return None
+    return _build_detail_payload(state=state, entry=entry)
+
+
+def _entry_ref(state: AppState, record_id: str) -> EntryRef:
     """Identity of one entry (id, class, kind) without enriching its class."""
     class_name = state.entries.class_of(record_id)
     info = state.classes.get(class_name)
-    return {
-        'record_id': record_id,
-        'class_name': class_name,
-        'object_type': info.object_type if info else None,
-    }
+    return EntryRef(record_id=record_id, class_name=class_name, object_type=info.object_type if info else None)
 
 
-def build_find_entries_payload(state: AppState, prefix: str, limit: int = 20) -> list[dict]:
+def build_find_entries_payload(state: AppState, prefix: str, limit: int = 20) -> list[EntryRef]:
     """Entries whose id starts with ``prefix``."""
     ids = [record_id for record_id in sorted(state.entries.keys()) if record_id.startswith(prefix)]
     return [_entry_ref(state, record_id) for record_id in ids[:limit]]
 
 
-def build_pinned_entries_payload(state: AppState, pins: list[str]) -> list[dict]:
+def build_pinned_entries_payload(state: AppState, pins: list[str]) -> list[EntryRef]:
     """Pinned entries that still exist, in pin order."""
     return [_entry_ref(state, record_id) for record_id in pins if record_id in state.entries]

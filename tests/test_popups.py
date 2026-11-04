@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 from conftest import make_analysis
+from pygeodata_browser.contracts import JsonPopup
 from pygeodata_browser.popups import (
     _dependency_graph,
     _inject_graph_links,
@@ -62,8 +63,7 @@ def test_build_json_popup_valid(tmp_path: Path) -> None:
     f = tmp_path / 'data.json'
     f.write_text(json.dumps({'key': 'value'}))
     result = build_json_popup(str(f))
-    assert result['title'] == 'data.json'
-    assert result['json'] == {'key': 'value'}
+    assert result == JsonPopup(title='data.json', json={'key': 'value'})
 
 
 def test_build_json_popup_missing_file(tmp_path: Path) -> None:

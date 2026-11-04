@@ -9,7 +9,8 @@ from pygeodata.catalog.types import LinkedEntry, ParamRow, ParamRowType
 from pygeodata.enums import JSONKeys, SpecKeys
 from pygeodata.views.filters import Filter, FilterTarget
 from pygeodata.views.types import ClassInfo, SpecInfo
-from pygeodata_browser.models import EntryInfo, FileRef
+from pygeodata_browser.contracts import EntriesPage, EntryRef, FileRef
+from pygeodata_browser.models import EntryInfo
 from pygeodata_browser.payloads import (
     _build_class_cards,
     _build_detail_payload,
@@ -384,18 +385,18 @@ def test_build_class_cards_fields():
     cards = _build_class_cards(state, sidebar_counts={'MyLoader': 1}, selected_classes=['MyLoader'])
     assert len(cards) == 1
     card = cards[0]
-    assert card['class_name'] == 'MyLoader'
-    assert card['selected'] is True
-    assert card['total_record_count'] == 1
-    assert card['visible_record_count'] == 1
-    assert card['loaded'] is True
+    assert card.class_name == 'MyLoader'
+    assert card.selected is True
+    assert card.total_record_count == 1
+    assert card.visible_record_count == 1
+    assert card.loaded is True
 
 
 def test_build_class_cards_not_selected():
     state = simple_state()
     cards = _build_class_cards(state, sidebar_counts={}, selected_classes=[])
-    assert cards[0]['selected'] is False
-    assert cards[0]['visible_record_count'] == 0
+    assert cards[0].selected is False
+    assert cards[0].visible_record_count == 0
 
 
 def test_build_class_cards_sorted():
@@ -406,16 +407,16 @@ def test_build_class_cards_sorted():
         },
     )
     cards = _build_class_cards(state, sidebar_counts={}, selected_classes=[])
-    assert cards[0]['class_name'] == 'ALoader'
-    assert cards[1]['class_name'] == 'ZLoader'
+    assert cards[0].class_name == 'ALoader'
+    assert cards[1].class_name == 'ZLoader'
 
 
 def test_build_class_cards_stale_flags():
     cls = make_class_info('MyLoader', source_stale=True, deps_stale=True)
     state = make_state(classes={'MyLoader': cls})
     cards = _build_class_cards(state, sidebar_counts={}, selected_classes=[])
-    assert cards[0]['source_stale'] is True
-    assert cards[0]['deps_stale'] is True
+    assert cards[0].source_stale is True
+    assert cards[0].deps_stale is True
 
 
 # ---------------------------------------------------------------------------
@@ -435,8 +436,8 @@ def test_build_table_rows_header_only():
         row_display='none',
     )
     assert len(rows) == 1
-    assert rows[0]['row_type'] == 'header'
-    assert rows[0]['record_id'] == 'rec1'
+    assert rows[0].row_type == 'header'
+    assert rows[0].record_id == 'rec1'
 
 
 def test_build_table_rows_row_display_all():
@@ -450,7 +451,7 @@ def test_build_table_rows_row_display_all():
         logic_mode='AND',
         row_display='all',
     )
-    types = [r['row_type'] for r in rows]
+    types = [r.row_type for r in rows]
     assert types.count('header') == 1
     assert types.count('detail') == 2
 
@@ -466,9 +467,9 @@ def test_build_table_rows_row_display_selected():
         logic_mode='AND',
         row_display='selected',
     )
-    detail_rows = [r for r in rows if r['row_type'] == 'detail']
+    detail_rows = [r for r in rows if r.row_type == 'detail']
     assert len(detail_rows) == 1
-    assert detail_rows[0]['parameter'] == 'year'
+    assert detail_rows[0].parameter == 'year'
 
 
 def test_build_table_rows_focused_entry():
@@ -482,7 +483,7 @@ def test_build_table_rows_focused_entry():
         logic_mode='AND',
         row_display='none',
     )
-    assert rows[0]['focused'] is True
+    assert rows[0].focused is True
 
 
 def test_build_table_rows_unfocused():
@@ -496,7 +497,7 @@ def test_build_table_rows_unfocused():
         logic_mode='AND',
         row_display='none',
     )
-    assert rows[0]['focused'] is False
+    assert rows[0].focused is False
 
 
 def test_build_table_rows_dep_hash_stale():
@@ -510,7 +511,7 @@ def test_build_table_rows_dep_hash_stale():
         logic_mode='AND',
         row_display='none',
     )
-    assert rows[0]['dep_hash_stale'] is True
+    assert rows[0].dep_hash_stale is True
 
 
 def test_build_table_rows_missing_class_info():
@@ -524,7 +525,7 @@ def test_build_table_rows_missing_class_info():
         logic_mode='AND',
         row_display='none',
     )
-    assert rows[0]['source_stale'] is False
+    assert rows[0].source_stale is False
 
 
 # ---------------------------------------------------------------------------
@@ -536,62 +537,16 @@ def test_build_detail_payload_selected_entry():
     entry = make_entry(record_id='rec1', class_name='MyLoader')
     cls = make_class_info('MyLoader')
     state = make_state(entries=make_entry_store(entry), classes={'MyLoader': cls})
-    detail = _build_detail_payload(
-        state=state,
-        selected_entry_info=entry,
-        selected_classes=[],
-        vreg=state.version_registry,
-    )
+    detail = _build_detail_payload(state=state, entry=entry)
     assert detail is not None
-    assert detail['class_name'] == 'MyLoader'
-    assert detail['selected_entry']['record_id'] == 'rec1'
+    assert detail.class_name == 'MyLoader'
+    assert detail.selected_entry.record_id == 'rec1'
 
 
 def test_build_detail_payload_entry_class_not_in_state():
     entry = make_entry(class_name='GhostLoader')
     state = make_state()
-    detail = _build_detail_payload(
-        state=state,
-        selected_entry_info=entry,
-        selected_classes=[],
-        vreg=state.version_registry,
-    )
-    assert detail is None
-
-
-def test_build_detail_payload_single_selected_class():
-    cls = make_class_info('MyLoader')
-    state = make_state(classes={'MyLoader': cls})
-    detail = _build_detail_payload(
-        state=state,
-        selected_entry_info=None,
-        selected_classes=['MyLoader'],
-        vreg=state.version_registry,
-    )
-    assert detail is not None
-    assert detail['class_name'] == 'MyLoader'
-    assert detail['selected_entry'] is None
-
-
-def test_build_detail_payload_multiple_selected_classes():
-    state = make_state(classes={'A': make_class_info('A'), 'B': make_class_info('B')})
-    detail = _build_detail_payload(
-        state=state,
-        selected_entry_info=None,
-        selected_classes=['A', 'B'],
-        vreg=state.version_registry,
-    )
-    assert detail is None
-
-
-def test_build_detail_payload_no_selection():
-    state = make_state()
-    detail = _build_detail_payload(
-        state=state,
-        selected_entry_info=None,
-        selected_classes=[],
-        vreg=state.version_registry,
-    )
+    detail = _build_detail_payload(state=state, entry=entry)
     assert detail is None
 
 
@@ -600,13 +555,8 @@ def test_build_detail_payload_figure_preview():
     entry = make_entry(record_id='rec1', class_name='MyLoader', primary_file=file_ref)
     cls = make_class_info('MyLoader')
     state = make_state(entries=make_entry_store(entry), classes={'MyLoader': cls})
-    detail = _build_detail_payload(
-        state=state,
-        selected_entry_info=entry,
-        selected_classes=[],
-        vreg=state.version_registry,
-    )
-    assert detail['selected_entry']['figure_preview'] == '/data/fig.png'
+    detail = _build_detail_payload(state=state, entry=entry)
+    assert detail.selected_entry.figure_preview == '/data/fig.png'
 
 
 def test_build_detail_payload_no_preview_for_non_image():
@@ -614,13 +564,8 @@ def test_build_detail_payload_no_preview_for_non_image():
     entry = make_entry(record_id='rec1', class_name='MyLoader', primary_file=file_ref)
     cls = make_class_info('MyLoader')
     state = make_state(entries=make_entry_store(entry), classes={'MyLoader': cls})
-    detail = _build_detail_payload(
-        state=state,
-        selected_entry_info=entry,
-        selected_classes=[],
-        vreg=state.version_registry,
-    )
-    assert detail['selected_entry']['figure_preview'] is None
+    detail = _build_detail_payload(state=state, entry=entry)
+    assert detail.selected_entry.figure_preview is None
 
 
 def test_build_detail_payload_table_preview():
@@ -628,14 +573,9 @@ def test_build_detail_payload_table_preview():
     entry = make_entry(record_id='rec1', class_name='MyTable', primary_file=file_ref)
     cls = make_class_info('MyTable')
     state = make_state(entries=make_entry_store(entry), classes={'MyTable': cls})
-    detail = _build_detail_payload(
-        state=state,
-        selected_entry_info=entry,
-        selected_classes=[],
-        vreg=state.version_registry,
-    )
-    assert detail['selected_entry']['table_preview'] == '/data/preview.html'
-    assert detail['selected_entry']['figure_preview'] is None
+    detail = _build_detail_payload(state=state, entry=entry)
+    assert detail.selected_entry.table_preview == '/data/preview.html'
+    assert detail.selected_entry.figure_preview is None
 
 
 def test_build_detail_payload_no_table_preview_for_non_table():
@@ -643,34 +583,17 @@ def test_build_detail_payload_no_table_preview_for_non_table():
     entry = make_entry(record_id='rec1', class_name='MyLoader', primary_file=file_ref)
     cls = make_class_info('MyLoader')
     state = make_state(entries=make_entry_store(entry), classes={'MyLoader': cls})
-    detail = _build_detail_payload(
-        state=state,
-        selected_entry_info=entry,
-        selected_classes=[],
-        vreg=state.version_registry,
-    )
-    assert detail['selected_entry']['table_preview'] is None
+    detail = _build_detail_payload(state=state, entry=entry)
+    assert detail.selected_entry.table_preview is None
 
 
-def test_build_detail_payload_co_outputs_key_matches_frontend():
-    """Guards a real bug: the payload key must be 'co_outputs' (what detail.js reads via
-    entry.co_outputs), not 'co_output_hashes' (JSONKeys.CO_OUTPUTS' value, which was
-    previously used here by mistake and made the co-outputs card silently never render).
-    """
+def test_build_detail_payload_co_outputs():
     co_entry = make_entry(record_id='co1', class_name='CoLoader')
     entry = make_entry(record_id='rec1', class_name='MyLoader', co_outputs=[co_entry])
     cls = make_class_info('MyLoader')
     state = make_state(entries=make_entry_store(entry), classes={'MyLoader': cls})
-    detail = _build_detail_payload(
-        state=state,
-        selected_entry_info=entry,
-        selected_classes=[],
-        vreg=state.version_registry,
-    )
-    assert 'co_outputs' in detail['selected_entry']
-    assert len(detail['selected_entry']['co_outputs']) == 1
-    assert detail['selected_entry']['co_outputs'][0]['class_name'] == 'CoLoader'
-    assert 'co_output_hashes' not in detail['selected_entry']
+    detail = _build_detail_payload(state=state, entry=entry)
+    assert [co.class_name for co in detail.selected_entry.co_outputs] == ['CoLoader']
 
 
 def test_build_detail_payload_linked_entries():
@@ -678,16 +601,11 @@ def test_build_detail_payload_linked_entries():
     entry = make_entry(record_id='rec1', class_name='MyLoader', linked_entries=[le])
     cls = make_class_info('MyLoader')
     state = make_state(entries=make_entry_store(entry), classes={'MyLoader': cls})
-    detail = _build_detail_payload(
-        state=state,
-        selected_entry_info=entry,
-        selected_classes=[],
-        vreg=state.version_registry,
-    )
-    linked = detail['selected_entry']['linked_entries']
+    detail = _build_detail_payload(state=state, entry=entry)
+    linked = detail.selected_entry.linked_entries
     assert len(linked) == 1
-    assert linked[0]['param_name'] == 'base'
-    assert linked[0][JSONKeys.CLASS_NAME] == 'BaseLoader'
+    assert linked[0].param_name == 'base'
+    assert linked[0].class_name == 'BaseLoader'
 
 
 def test_linked_entry_summary_keeps_every_list_value() -> None:
@@ -712,13 +630,8 @@ def test_linked_entry_summary_keeps_every_list_value() -> None:
     le = LinkedEntry(param_name='diseases', class_name='DiseaseSpec', state_hash=None)
     entry = make_entry(rows=rows, linked_entries=[le])
     state = make_state(entries=make_entry_store(entry), classes={'MyLoader': make_class_info('MyLoader')})
-    detail = _build_detail_payload(
-        state=state,
-        selected_entry_info=entry,
-        selected_classes=[],
-        vreg=state.version_registry,
-    )
-    assert detail['selected_entry']['linked_entries'][0]['params_summary'] == {
+    detail = _build_detail_payload(state=state, entry=entry)
+    assert detail.selected_entry.linked_entries[0].params_summary == {
         'label': ['who'],
         'codes[]': ['11260', '11820'],
         'features[]': ['FeatureSpec', 'FeatureSpec'],
@@ -780,9 +693,9 @@ def test_version_groups_has_entries_true_when_entry_points_to_group(tmp_path: Pa
     # snap_pre contains h1 (Initial) → maps to Initial group
     payload_with = version_groups_payload(vreg, entry_dep_hashes={'snap_post'})
     # The version-change group (v1) should have has_entries=True
-    non_initial = [g for g in payload_with if 'Initial' not in g['label']]
+    non_initial = [g for g in payload_with if 'Initial' not in g.label]
     assert non_initial, 'expected at least one non-Initial group'
-    assert non_initial[0]['has_entries'] is True
+    assert non_initial[0].has_entries is True
 
 
 def test_version_groups_has_entries_false_when_no_entries(tmp_path: Path) -> None:
@@ -798,7 +711,7 @@ def test_version_groups_has_entries_false_when_no_entries(tmp_path: Path) -> Non
     # Pass an empty dep_hash set — no entries point at anything
     payload = version_groups_payload(vreg, entry_dep_hashes=set())
     for group in payload:
-        assert group['has_entries'] is False
+        assert group.has_entries is False
 
 
 def test_version_groups_has_entries_default_true_when_no_dep_hashes_arg(tmp_path: Path) -> None:
@@ -813,7 +726,7 @@ def test_version_groups_has_entries_default_true_when_no_dep_hashes_arg(tmp_path
     vreg = VersionRegistry(r)
     payload = version_groups_payload(vreg)  # no entry_dep_hashes
     for group in payload:
-        assert group['has_entries'] is True
+        assert group.has_entries is True
 
 
 def test_version_groups_v1_has_entries_when_entry_points_there(tmp_path: Path) -> None:
@@ -829,9 +742,9 @@ def test_version_groups_v1_has_entries_when_entry_points_there(tmp_path: Path) -
     vreg = VersionRegistry(r)
     # snap_pre's nodes contain h1 which is in the first (v1) group
     payload = version_groups_payload(vreg, entry_dep_hashes={'snap_pre'})
-    v1_groups = [g for g in payload if 'v1' in g['label']]
+    v1_groups = [g for g in payload if 'v1' in g.label]
     assert v1_groups, 'expected v1 group'
-    assert v1_groups[0]['has_entries'] is True
+    assert v1_groups[0].has_entries is True
 
 
 # ---------------------------------------------------------------------------
@@ -849,8 +762,8 @@ def _wide_state(n_entries: int = 5, rows_per_entry: int = 4) -> AppState:
     )
 
 
-def _page_ids(payload: dict) -> list[str]:
-    return [r['record_id'] for r in payload['table_rows'] if r['row_type'] == 'header']
+def _page_ids(payload: EntriesPage) -> list[str]:
+    return [r.record_id for r in payload.table_rows if r.row_type == 'header']
 
 
 def test_entries_page_max_rows_caps_page_by_param_rows() -> None:
@@ -862,7 +775,7 @@ def test_entries_page_max_rows_caps_page_by_param_rows() -> None:
         max_rows=10,
     )
     assert _page_ids(payload) == ['rec0', 'rec1']
-    assert payload['total'] == 5
+    assert payload.total == 5
 
 
 def test_entries_page_max_rows_always_returns_one_entry() -> None:
@@ -888,7 +801,7 @@ def test_entries_page_only_ids_restricts_to_pinned() -> None:
         only_ids={'rec1', 'rec3', 'gone'},
     )
     assert _page_ids(payload) == ['rec1', 'rec3']
-    assert payload['total'] == 2
+    assert payload.total == 2
 
 
 def test_linked_entry_summary_resolves_repeated_param_names() -> None:
@@ -915,13 +828,8 @@ def test_linked_entry_summary_resolves_repeated_param_names() -> None:
     ]
     entry = make_entry(rows=rows, linked_entries=links)
     state = make_state(entries=make_entry_store(entry), classes={'MyLoader': make_class_info('MyLoader')})
-    detail = _build_detail_payload(
-        state=state,
-        selected_entry_info=entry,
-        selected_classes=[],
-        vreg=state.version_registry,
-    )
-    summaries = [le['params_summary'] for le in detail['selected_entry']['linked_entries']]
+    detail = _build_detail_payload(state=state, entry=entry)
+    summaries = [le.params_summary for le in detail.selected_entry.linked_entries]
     assert summaries == [
         {'df_loader': ['Inner'], 'year': ['2020']},
         {'region': ['EU']},
@@ -937,14 +845,14 @@ def test_find_entries_by_id_prefix() -> None:
         entries=make_entry_store(*entries), classes={'MyLoader': make_class_info('MyLoader', object_type='table')}
     )
     assert build_find_entries_payload(state, 'ab') == [
-        {'record_id': 'abc123', 'class_name': 'MyLoader', 'object_type': 'table'},
-        {'record_id': 'abd999', 'class_name': 'MyLoader', 'object_type': 'table'},
+        EntryRef('abc123', 'MyLoader', 'table'),
+        EntryRef('abd999', 'MyLoader', 'table'),
     ]
     assert build_find_entries_payload(state, 'ff') == [
-        {'record_id': 'ffff00', 'class_name': 'Other', 'object_type': None},
+        EntryRef('ffff00', 'Other', None),
     ]
     assert build_find_entries_payload(state, 'ab', limit=1) == [
-        {'record_id': 'abc123', 'class_name': 'MyLoader', 'object_type': 'table'},
+        EntryRef('abc123', 'MyLoader', 'table'),
     ]
 
 
@@ -952,6 +860,6 @@ def test_pinned_entries_skip_missing_and_keep_order() -> None:
     entries = [make_entry(record_id=rid, class_name='MyLoader') for rid in ('aaa', 'bbb')]
     state = make_state(entries=make_entry_store(*entries), classes={'MyLoader': make_class_info('MyLoader')})
     assert build_pinned_entries_payload(state, ['bbb', 'gone', 'aaa']) == [
-        {'record_id': 'bbb', 'class_name': 'MyLoader', 'object_type': 'data'},
-        {'record_id': 'aaa', 'class_name': 'MyLoader', 'object_type': 'data'},
+        EntryRef('bbb', 'MyLoader', 'data'),
+        EntryRef('aaa', 'MyLoader', 'data'),
     ]

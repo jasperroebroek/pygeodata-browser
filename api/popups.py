@@ -13,6 +13,7 @@ from pygeodata.graph_types import ClassNode, DependencyGraph
 from pygeodata.graphs import plot_class_dependency_graph
 from pygeodata.table import Table
 from pygeodata.tracked_object import TrackedObject
+from pygeodata_browser.contracts import GraphPdfPopup, GraphSvgPopup, JsonPopup
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ def _dependency_graph(analysis: ProjectAnalysis, class_name: str) -> DependencyG
     )
 
 
-def build_json_popup(file_path: str) -> dict:
+def build_json_popup(file_path: str) -> JsonPopup:
     """Return JSON file contents as parsed data for the client-side explorer."""
     path = Path(file_path)
     try:
@@ -43,10 +44,7 @@ def build_json_popup(file_path: str) -> dict:
     except json.JSONDecodeError as exc:
         raise ValueError(f'Invalid JSON: {file_path}') from exc
 
-    return {
-        'title': path.name,
-        'json': data,
-    }
+    return JsonPopup(title=path.name, json=data)
 
 
 def _inject_graph_links(svg: str, known_classes: frozenset[str]) -> str:
@@ -69,7 +67,11 @@ def _inject_graph_links(svg: str, known_classes: frozenset[str]) -> str:
     return pattern.sub(replace_node, svg)
 
 
-def build_graph_popup(class_name: str, analysis: ProjectAnalysis, graph_path: str | None = None) -> dict[str, str]:
+def build_graph_popup(
+    class_name: str,
+    analysis: ProjectAnalysis,
+    graph_path: str | None = None,
+) -> GraphSvgPopup | GraphPdfPopup:
     logger.info('Building graph popup for class %s', class_name)
 
     if class_name in analysis.classes:
@@ -86,17 +88,11 @@ def build_graph_popup(class_name: str, analysis: ProjectAnalysis, graph_path: st
         known_classes = frozenset(analysis.classes)
         svg = _inject_graph_links(svg, known_classes)
 
-        return {
-            'title': f'Graph · {class_name}',
-            'svg': svg,
-        }
+        return GraphSvgPopup(title=f'Graph · {class_name}', svg=svg)
 
     # Class not in the project — serve the pre-rendered PDF path for the frontend to display
     if graph_path is not None:
-        return {
-            'title': f'Graph · {class_name}',
-            'pdf_path': graph_path,
-        }
+        return GraphPdfPopup(title=f'Graph · {class_name}', pdf_path=graph_path)
 
     logger.error('Cannot build graph popup: class not in the project and no graph_path: %s', class_name)
     raise KeyError(class_name)

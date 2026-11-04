@@ -6,10 +6,19 @@ from pathlib import Path
 from conftest import make_analysis, make_entry_store
 from pygeodata.config import set_config
 from pygeodata.enums import JSONKeys
+from pygeodata.registries.registry_types import ChangeStatus
 from pygeodata.registries.versioning import VersionRegistry
 from pygeodata.static import analyse_project
 from pygeodata.views.types import SpecInfo
 from pygeodata_browser import code_service
+from pygeodata_browser.contracts import (
+    FullDiffPayload,
+    SnapshotLine,
+    SnapshotPayload,
+    VersionChange,
+    VersionDiff,
+    VersionDiffError,
+)
 from pygeodata_browser.models import EntryInfo
 
 # ---------------------------------------------------------------------------
@@ -78,11 +87,11 @@ def test_version_diff_error_paths(tmp_path: Path):
         result = code_service.version_diff(
             vreg_empty, make_analysis(), record_id='rec1', entries=make_entry_store(entry_no_dep)
         )
-        assert result == {'error': 'no_snapshot', 'message': 'Snapshot not available for this entry'}
+        assert result == VersionDiffError('no_snapshot', 'Snapshot not available for this entry')
 
-        # unknown record_id → __not_found__ sentinel
+        # unknown record_id → None (the route answers 404)
         result = code_service.version_diff(vreg_empty, make_analysis(), record_id='missing', entries=make_entry_store())
-        assert result.get('__not_found__') is True
+        assert result is None
 
         # dep_hash present but unknown to any version group → no_snapshot
         vreg = VersionRegistry(registry)
@@ -90,11 +99,11 @@ def test_version_diff_error_paths(tmp_path: Path):
         result = code_service.version_diff(
             vreg, make_analysis(), record_id='rec1', entries=make_entry_store(entry_bad_dep)
         )
-        assert result['error'] == 'no_snapshot'
+        assert result == VersionDiffError('no_snapshot', 'Base version not found')
 
         # neither record_id nor base_version_id → bad_request
         result = code_service.version_diff(vreg_empty, make_analysis())
-        assert result['error'] == 'bad_request'
+        assert result == VersionDiffError('bad_request', 'base_version_id or record_id required')
 
 
 def test_version_diff_explicit_base_version_changed(tmp_path: Path):
@@ -114,18 +123,12 @@ def test_version_diff_explicit_base_version_changed(tmp_path: Path):
             vreg, make_analysis(), base_version_id=initial_vid, target_version_id=change_vid
         )
 
-    assert 'changes' in result
-    changes = result['changes']
-    assert len(changes) == 1
-    c = changes[0]
-    assert c['status'] == 'changed'
-    assert c['class_name'] == 'MyLoader'
-    assert c['hash_old'] == 'h1'
-    assert c['hash_new'] == 'h2'
+    assert isinstance(result, VersionDiff)
+    assert result.changes == [VersionChange('MyLoader', ChangeStatus.CHANGED, hash_old='h1', hash_new='h2')]
+    assert result.base_version_id == initial_vid
 
 
-def test_version_diff_result_keys(tmp_path: Path):
-    """Result dict must contain changes, base_version_id, has_live_stale."""
+def test_version_diff_result_fields(tmp_path: Path):
     registry = tmp_path / '.source'
     _write_code_snapshot(registry, 'h1', 'StableClass', 'class StableClass: pass\n', mtime='2026-01-01T00:00:00+00:00')
 
@@ -136,7 +139,8 @@ def test_version_diff_result_keys(tmp_path: Path):
             vreg, make_analysis(), base_version_id=initial_vid, target_version_id=initial_vid
         )
 
-    assert set(result.keys()) >= {'changes', 'base_version_id', 'has_live_stale'}
+    assert isinstance(result, VersionDiff)
+    assert result.base_version_id == initial_vid
 
 
 def write_loader(project: Path, body: str) -> None:
@@ -164,13 +168,13 @@ def test_diff_and_snapshot_fall_back_to_the_current_source(tmp_path: Path) -> No
         snapshot = code_service.snapshot_html(live, vreg, analysis)
         missing = code_service.diff_hashes('h1', 'unknown', full=False, vreg=vreg, analysis=analysis)
 
-    assert diff is not None
-    assert diff['full_new'] == 'class MyLoader(Data):\n    x = 2\n'
-    assert [line['type'] for line in diff['hunks'][0]['lines']] == ['ctx', 'del', 'add']
-    assert snapshot == {
-        'class_name': 'MyLoader',
-        'lines': [{'text': 'class MyLoader(Data):', 'cls_link': None}, {'text': '    x = 2', 'cls_link': None}],
-    }
+    assert isinstance(diff, FullDiffPayload)
+    assert diff.full_new == 'class MyLoader(Data):\n    x = 2\n'
+    assert [line.type for line in diff.hunks[0].lines] == ['ctx', 'del', 'add']
+    assert snapshot == SnapshotPayload(
+        class_name='MyLoader',
+        lines=[SnapshotLine('class MyLoader(Data):', None), SnapshotLine('    x = 2', None)],
+    )
     assert missing is None
 
 
@@ -185,6 +189,7 @@ def test_version_diff_live_is_the_analysed_code(tmp_path: Path) -> None:
         vreg = VersionRegistry(registry)
         result = code_service.version_diff(vreg, analysis, base_version_id=vreg.versions[0].version_id)
 
-    assert result['has_live_stale'] is True
-    assert [(c['class_name'], c['status']) for c in result['changes']] == [('MyLoader', 'changed')]
-    assert result['changes'][0]['hash_new'] == analysis.classes['MyLoader'].facts.source_hash
+    assert isinstance(result, VersionDiff)
+    assert result.has_live_stale is True
+    assert [(c.class_name, c.status) for c in result.changes] == [('MyLoader', ChangeStatus.CHANGED)]
+    assert result.changes[0].hash_new == analysis.classes['MyLoader'].facts.source_hash

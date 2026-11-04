@@ -6,11 +6,12 @@ import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 from pygeodata.analysis import AnalysisError, ProjectAnalysis, analyse_in_subprocess
+from pygeodata.catalog.store import SkippedDirs
 from pygeodata.catalog.types import CatalogNewerError, CatalogOutdatedError
 from pygeodata.config import get_config
+from pygeodata.enums import SpecKeys
 from pygeodata.project import iter_project_files
 from pygeodata.registries.registry import EntryRegistry
 from pygeodata.registries.versioning import VersionRegistry
@@ -19,14 +20,13 @@ from pygeodata.views.classes import merge_unknown_classes, source_classes
 from pygeodata.views.entries import spec_options
 from pygeodata.views.types import ClassInfo, spec_info
 from pygeodata_browser.catalog_context import CatalogContext, offline_roots
+from pygeodata_browser.contracts import Diagnostics, Mode, SpecOption, SpecOptions
 from pygeodata_browser.entry_store import EntryStore
 
 _log = logging.getLogger(__name__)
 
 POLL_INTERVAL = 10.0
 IMPORT_TIMEOUT = 600.0
-
-Mode = Literal['static', 'import']
 
 
 class CatalogError(Exception):
@@ -65,8 +65,8 @@ class AppState:
 
     classes: dict[str, ClassInfo]
     entries: EntryStore
-    diagnostics: dict
-    spec_options: dict[str, list[str]]
+    diagnostics: Diagnostics
+    spec_options: SpecOptions
     entry_registry: EntryRegistry
     version_registry: VersionRegistry
     analysis: ProjectAnalysis
@@ -220,6 +220,16 @@ def catalog_error(exc: CatalogOutdatedError | CatalogNewerError) -> str:
     return f'The catalog was written by an older pygeodata; run `pygeodata catalog build` where it is written{where}.'
 
 
+def spec_options_contract(registry: EntryRegistry) -> SpecOptions:
+    options = spec_options(registry)
+    return SpecOptions(
+        crs=options[SpecKeys.CRS],
+        resolution=[SpecOption(**option) for option in options[SpecKeys.RESOLUTION]],
+        shape=options[SpecKeys.SHAPE],
+        bounds=[SpecOption(**option) for option in options[SpecKeys.BOUNDS]],
+    )
+
+
 def build_state(
     analysis: ProjectAnalysis,
     read_only: bool | None = None,
@@ -234,10 +244,15 @@ def build_state(
     offline_root = offline_roots(entry_registry)
     catalog = CatalogContext.build(entry_registry, read_only, offline_root, unavailable_since or {})
     entries = EntryStore(entry_registry, analysis.tree_hashes.get, version_registry, offline_root)
-    diagnostics = dict(entry_registry.diagnostics())
-    diagnostics['created_entries'] = len(entries)
-    diagnostics['offline_entries'] = len(offline_root)
-    diagnostics['problems'] = analysis.problems
+    registry_diagnostics = entry_registry.diagnostics()
+    reasons = registry_diagnostics.pop('unindexed_reasons')
+    diagnostics = Diagnostics(
+        **registry_diagnostics,
+        unindexed_reasons=SkippedDirs(**reasons) if reasons else None,
+        created_entries=len(entries),
+        offline_entries=len(offline_root),
+        problems=analysis.problems,
+    )
 
     classes = merge_unknown_classes(
         source_classes(analysis),
@@ -252,7 +267,7 @@ def build_state(
         classes=classes,
         entries=entries,
         diagnostics=diagnostics,
-        spec_options=spec_options(entry_registry),
+        spec_options=spec_options_contract(entry_registry),
         entry_registry=entry_registry,
         version_registry=version_registry,
         analysis=analysis,

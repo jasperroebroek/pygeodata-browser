@@ -1,4 +1,3 @@
-import dataclasses
 import io
 import json
 import logging
@@ -12,11 +11,11 @@ import uuid
 from contextlib import redirect_stdout
 from pathlib import Path
 
+import msgspec
 from flask import (
     Flask,
     Response,
     abort,
-    jsonify,
     request,
     send_file,
     send_from_directory,
@@ -27,6 +26,22 @@ from pygeodata.catalog import store
 from pygeodata.catalog.types import CatalogData, CatalogEntry
 from pygeodata.config import get_config
 from pygeodata_browser import code_service, export_service, payloads
+from pygeodata_browser.contracts import (
+    BootstrapRow,
+    CleanResult,
+    EntriesPage,
+    ExportStart,
+    ExportStatus,
+    ExportTable,
+    FoundEntries,
+    LoadingPayload,
+    Ok,
+    PinsPayload,
+    ResolvedDepHash,
+    ResolvedSourceHash,
+    StatusPayload,
+    VersionsPayload,
+)
 from pygeodata_browser.logging import configure_logging
 from pygeodata_browser.path_actions import open_path, reveal_path
 from pygeodata_browser.payloads import (
@@ -57,13 +72,16 @@ def _refuse_in_mirror() -> None:
         abort(409, 'The browser is read-only (mirror mode): it never writes into the project')
 
 
-def _loading():
-    return ({'loading': True, 'fast': bool(app.config.get('FAST'))}, 202)
+def _json(payload: object, status: int = 200) -> Response:
+    return Response(msgspec.json.encode(payload), status=status, mimetype='application/json')
+
+
+def _loading() -> Response:
+    return _json(LoadingPayload(fast=bool(app.config.get('FAST'))), status=202)
 
 
 app = Flask(__name__, template_folder='templates')
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
-app.json.sort_keys = False
 
 
 def _allowed_roots() -> list[Path]:
@@ -117,19 +135,19 @@ def app_asset(filename: str) -> Response:
     return send_from_directory(_APP_DIST / 'assets', filename)
 
 
-def _bootstrap_row(entry: CatalogEntry) -> dict:
+def _bootstrap_row(entry: CatalogEntry) -> BootstrapRow:
     rec = entry.record
-    return {
-        'state_hash': rec.state_hash,
-        'class_name': rec.class_name,
-        'object_type': rec.object_type,
-        'source_hash': rec.source_hash,
-        'dependency_tree_hash': rec.dependency_tree_hash,
-        'instance_hash': rec.instance_hash,
-        'params_hash': rec.params_hash,
-        'spec_hash': rec.spec_hash,
-        'created_at': entry.created_at,
-    }
+    return BootstrapRow(
+        state_hash=rec.state_hash,
+        class_name=rec.class_name,
+        object_type=rec.object_type,
+        source_hash=rec.source_hash,
+        dependency_tree_hash=rec.dependency_tree_hash,
+        instance_hash=rec.instance_hash,
+        params_hash=rec.params_hash,
+        spec_hash=rec.spec_hash,
+        created_at=entry.created_at,
+    )
 
 
 @app.get('/api/bootstrap')
@@ -145,20 +163,20 @@ def api_bootstrap() -> Response:
         rows = [_bootstrap_row(e) for e in store.bootstrap_rows(catalog)]
     except Exception:  # noqa: BLE001 — bootstrap is best-effort; the full load follows
         rows = []
-    return jsonify(rows)
+    return _json(rows)
 
 
 @app.get('/api/popup/json')
 def api_popup_json():
     path = _assert_allowed_path(request.args['path'])
-    return jsonify(build_json_popup(str(path)))
+    return _json(build_json_popup(str(path)))
 
 
 @app.get('/api/popup/graph')
 def api_popup_graph():
     if _ctx.is_loading() or _ctx.state is None:
         return _loading()
-    return jsonify(
+    return _json(
         build_graph_popup(
             request.args['class_name'],
             _ctx.state.analysis,
@@ -189,29 +207,29 @@ def api_file():
 def api_open():
     raw = (request.get_json(force=True) or {}).get('path', '')
     open_path(str(_assert_allowed_path(raw)))
-    return jsonify({'ok': True})
+    return _json(Ok())
 
 
 @app.post('/api/reveal')
 def api_reveal():
     raw = (request.get_json(force=True) or {}).get('path', '')
     reveal_path(str(_assert_allowed_path(raw)))
-    return jsonify({'ok': True})
+    return _json(Ok())
 
 
 @app.get('/api/status')
 def api_status():
-    return jsonify(
-        {
-            'ready': _ctx.ready.is_set(),
-            'load_error': _ctx.load_error,
-            'version': _ctx.version,
-            'has_live_classes': _has_current_classes(),
-            'mode': _ctx.mode,
-            'code_changed_since': _ctx.code_changed_since,
-            'next_import_at': _ctx.next_tick_at if _ctx.code_changed_since is not None else None,
-            'fast': bool(app.config.get('FAST')),
-        },
+    return _json(
+        StatusPayload(
+            ready=_ctx.ready.is_set(),
+            load_error=_ctx.load_error,
+            version=_ctx.version,
+            has_live_classes=_has_current_classes(),
+            mode=_ctx.mode,
+            code_changed_since=_ctx.code_changed_since,
+            next_import_at=_ctx.next_tick_at if _ctx.code_changed_since is not None else None,
+            fast=bool(app.config.get('FAST')),
+        ),
     )
 
 
@@ -230,7 +248,7 @@ def api_classes():
     """Class cards + filter options — changes only on reload or filter change."""
     if _ctx.is_loading() or _ctx.state is None:
         return _loading()
-    return jsonify(
+    return _json(
         build_classes_payload(
             _ctx.state,
             kind_filter=request.args.get('kind_filter', 'all'),
@@ -254,11 +272,11 @@ def api_class_entries():
     only_ids = None
     if request.args.get('pinned_only') == '1':
         pinned = build_pinned_entries_payload(_ctx.state, _ctx.state.catalog.pinned_hashes())
-        only_ids = {p['record_id'] for p in pinned}
-        classes = classes or sorted({p['class_name'] for p in pinned})
+        only_ids = {p.record_id for p in pinned}
+        classes = classes or sorted({p.class_name for p in pinned})
     if not classes and not ids_only:
-        return jsonify({'table_rows': [], 'total': 0, 'offset': 0, 'limit': 0})
-    return jsonify(
+        return _json(EntriesPage(table_rows=[], total=0, offset=0, limit=0))
+    return _json(
         build_entries_page_payload(
             _ctx.state,
             selected_classes=classes,
@@ -284,31 +302,31 @@ _MIN_HASH_PREFIX = 4
 
 
 @app.get('/api/find-entries')
-def api_find_entries() -> Response | tuple[dict, int]:
+def api_find_entries() -> Response:
     """Quick-switcher lookup by id (state hash) prefix; short or non-hex queries match nothing."""
     if _ctx.is_loading() or _ctx.state is None:
         return _loading()
     q = request.args.get('q', '').strip().lower()
     if len(q) < _MIN_HASH_PREFIX or not set(q) <= set(string.hexdigits.lower()):
-        return jsonify({'entries': []})
-    return jsonify({'entries': build_find_entries_payload(_ctx.state, q)})
+        return _json(FoundEntries(entries=[]))
+    return _json(FoundEntries(entries=build_find_entries_payload(_ctx.state, q)))
 
 
 def _pins_response() -> Response:
     assert _ctx.state is not None
     pins = _ctx.state.catalog.pinned_hashes()
-    return jsonify({'pins': build_pinned_entries_payload(_ctx.state, pins)})
+    return _json(PinsPayload(pins=build_pinned_entries_payload(_ctx.state, pins)))
 
 
 @app.get('/api/pins')
-def api_pins() -> Response | tuple[dict, int]:
+def api_pins() -> Response:
     if _ctx.is_loading() or _ctx.state is None:
         return _loading()
     return _pins_response()
 
 
 @app.put('/api/pins/<record_id>')
-def api_pin(record_id: str) -> Response | tuple[dict, int]:
+def api_pin(record_id: str) -> Response:
     if _ctx.is_loading() or _ctx.state is None:
         return _loading()
     if record_id not in _ctx.state.entries:
@@ -318,7 +336,7 @@ def api_pin(record_id: str) -> Response | tuple[dict, int]:
 
 
 @app.delete('/api/pins/<record_id>')
-def api_unpin(record_id: str) -> Response | tuple[dict, int]:
+def api_unpin(record_id: str) -> Response:
     if _ctx.is_loading() or _ctx.state is None:
         return _loading()
     _ctx.state.catalog.set_pinned(record_id, pinned=False)
@@ -340,7 +358,7 @@ def api_entry_detail(record_id: str):
     detail = build_entry_detail_payload(_ctx.state, record_id=record_id)
     if detail is None:
         abort(404)
-    resp = jsonify(detail)
+    resp = _json(detail)
     resp.headers['ETag'] = etag
     # Staleness badges and code versions are volatile: revalidate, never serve stale.
     resp.headers['Cache-Control'] = 'no-cache'
@@ -400,7 +418,7 @@ def api_delete_entry(record_id: str):
     if cache_dir.exists():
         shutil.rmtree(cache_dir)
     _ctx.reload()
-    return jsonify({'ok': True})
+    return _json(Ok())
 
 
 @app.post('/api/clean-cache')
@@ -418,7 +436,7 @@ def api_clean_cache():
     lines = [ln for ln in buf.getvalue().splitlines() if ln.strip()]
     if not dry_run:
         _ctx.reload()
-    return jsonify({'lines': lines, 'dry_run': dry_run})
+    return _json(CleanResult(lines=lines, dry_run=dry_run))
 
 
 @app.post('/api/clean-source')
@@ -434,7 +452,7 @@ def api_clean_source():
     lines = [ln for ln in buf.getvalue().splitlines() if ln.strip()]
     if not dry_run:
         _ctx.reload()
-    return jsonify({'lines': lines, 'dry_run': dry_run})
+    return _json(CleanResult(lines=lines, dry_run=dry_run))
 
 
 @app.get('/api/code/versions')
@@ -443,21 +461,17 @@ def api_code_versions():
     if _ctx.is_loading() or _ctx.state is None:
         return _loading()
 
-    return jsonify(
-        {
-            'versions': payloads.version_groups_payload(_ctx.state.version_registry, _ctx.state.entries.dep_hashes()),
-            'has_live_classes': _has_current_classes(),
-        },
+    return _json(
+        VersionsPayload(
+            versions=payloads.version_groups_payload(_ctx.state.version_registry, _ctx.state.entries.dep_hashes()),
+            has_live_classes=_has_current_classes(),
+        ),
     )
 
 
 @app.get('/api/code/resolve-dep-hash')
 def api_code_resolve_dep_hash():
-    """Resolve a dep_tree_hash + class_name to version_id and source_hash.
-
-    Returns ``{"version_id": "<uuid>", "source_hash": "<hex>"}``
-    or 404 if the snapshot or class is not found.
-    """
+    """Resolve a dep_tree_hash + class_name to version_id and source_hash; 404 if the snapshot or class is unknown."""
     dep_hash = request.args.get('dep_hash', '')
     class_name = request.args.get('class_name', '')
     if not dep_hash or not class_name:
@@ -469,15 +483,12 @@ def api_code_resolve_dep_hash():
     if not source_hash:
         abort(404)
     version = vreg.dep_hash_to_version.get(dep_hash)
-    return jsonify({'version_id': version.version_id if version else None, 'source_hash': source_hash})
+    return _json(ResolvedDepHash(version_id=version.version_id if version else None, source_hash=source_hash))
 
 
 @app.get('/api/code/source-hash-version')
 def api_code_source_hash_version():
-    """Resolve a source_hash to its version group.
-
-    Returns ``{"version_id": "<uuid>"}`` or 404.
-    """
+    """Resolve a source_hash to its version group; 404 if unknown."""
     if _ctx.is_loading() or _ctx.state is None:
         return _loading()
 
@@ -489,7 +500,7 @@ def api_code_source_hash_version():
     if version is None:
         abort(404)
 
-    return jsonify({'version_id': version.version_id})
+    return _json(ResolvedSourceHash(version_id=version.version_id))
 
 
 @app.get('/api/code/version-classes')
@@ -501,21 +512,12 @@ def api_code_version_classes():
     if _ctx.is_loading() or _ctx.state is None:
         return _loading()
     version_id = request.args.get('version_id', '')
-    return jsonify(
-        [
-            dataclasses.asdict(c)
-            for c in code_service.version_classes(version_id, _ctx.state.version_registry, _ctx.state.analysis)
-        ],
-    )
+    return _json(code_service.version_classes(version_id, _ctx.state.version_registry, _ctx.state.analysis))
 
 
 @app.get('/api/code/version-changes')
 def api_code_version_changes():
-    """Return a complete per-class change summary for a version group.
-
-    Pass ``version_id=<uuid>``.  Returns a list of
-    ``{class_name, status, hash_old, hash_new}`` entries, or 404 if unknown.
-    """
+    """Return a complete per-class change summary for a version group, or 404 if unknown."""
     if _ctx.is_loading() or _ctx.state is None:
         return _loading()
     version_id = request.args.get('version_id', '')
@@ -525,7 +527,7 @@ def api_code_version_changes():
     changes = vreg.version_change_summary_from_id(version_id)
     if changes is None:
         abort(404)
-    return jsonify([c.to_dict() for c in changes])
+    return _json(code_service.version_changes(changes))
 
 
 @app.get('/api/code/snapshot')
@@ -538,7 +540,7 @@ def api_code_snapshot():
     result = code_service.snapshot_html(source_hash, _ctx.state.version_registry, _ctx.state.analysis)
     if result is None:
         abort(404)
-    return jsonify(result)
+    return _json(result)
 
 
 @app.get('/api/code/diff')
@@ -559,7 +561,7 @@ def api_code_diff():
     )
     if result is None:
         abort(404)
-    return jsonify(result)
+    return _json(result)
 
 
 @app.get('/api/code/version-diff')
@@ -570,8 +572,6 @@ def api_code_version_diff():
       - record_id          to use the entry's version as base (target defaults to 'live')
       - base_version_id    to set the base explicitly (version_id or 'live')
     Optional: target_version_id (version_id or 'live'; defaults to 'live')
-
-    Returns {changes, base_version_id, has_live_stale}.
     """
     if _ctx.is_loading() or _ctx.state is None:
         return _loading()
@@ -591,9 +591,9 @@ def api_code_version_diff():
         base_version_id=base_version_id,
         target_version_id=target_version_id,
     )
-    if result.get('__not_found__'):
+    if result is None:
         abort(404)
-    return jsonify(result)
+    return _json(result)
 
 
 # ---------------------------------------------------------------------------
@@ -625,7 +625,7 @@ def api_export_start():
         args=(job_id, files),
         daemon=True,
     ).start()
-    return jsonify({'job_id': job_id, 'total': len(files), 'warnings': warnings})
+    return _json(ExportStart(job_id=job_id, total=len(files), warnings=warnings))
 
 
 @app.get('/api/export/status/<job_id>')
@@ -633,14 +633,14 @@ def api_export_status(job_id: str):
     job = export_service.get_job(job_id)
     if job is None:
         abort(404)
-    return jsonify(
-        {
-            'status': job['status'],
-            'done': job['done'],
-            'total': job['total'],
-            'error': job['error'],
-            'warnings': job['warnings'],
-        },
+    return _json(
+        ExportStatus(
+            status=job['status'],
+            done=job['done'],
+            total=job['total'],
+            error=job['error'],
+            warnings=job['warnings'],
+        ),
     )
 
 
@@ -697,7 +697,7 @@ def api_export_table():
         logic_mode='AND',
         row_display='all',
     )
-    return jsonify({'table_rows': rows})
+    return _json(ExportTable(table_rows=rows))
 
 
 @app.get('/api/export/single/<record_id>')

@@ -8,20 +8,12 @@ from pygeodata._version import FORMAT_VERSION
 from pygeodata.catalog import store
 from pygeodata.paths import CachePathConstructor
 from pygeodata.views.types import SpecInfo, spec_info
+from pygeodata_browser.contracts import FileRef
 
 if TYPE_CHECKING:
     from pygeodata.catalog.types import CatalogEntry, LinkedEntry, ParamRow
     from pygeodata.catalog.types import FileRef as CatalogFileRef
     from pygeodata.records import SpecRecord
-
-
-@dataclass
-class FileRef:
-    """An output file of an entry as the browser serves it: absolute path and display label."""
-
-    label: str
-    path: str
-    kind: str
 
 
 @dataclass

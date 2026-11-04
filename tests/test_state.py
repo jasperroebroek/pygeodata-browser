@@ -173,7 +173,7 @@ def test_analysis_problems_reach_the_diagnostics(project: Path) -> None:
 
     ctx = loaded(AppContext(root=project))
 
-    assert any('broken.py' in problem for problem in ctx.state.diagnostics['problems'])
+    assert any('broken.py' in problem for problem in ctx.state.diagnostics.problems)
 
 
 # --- static mode: re-analyse on change ---

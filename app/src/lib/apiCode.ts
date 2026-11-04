@@ -1,15 +1,9 @@
 // Client for the /api/code/* endpoints (api/web.py). Owned by the code-view milestone.
 
 import { fetchFresh } from './api';
+import type { VersionOption } from './api';
 
-export interface CodeVersion {
-  version_id: string;
-  mtime: string;
-  label: string;
-  class_names: string[];
-  changed_class_names: string[];
-  has_entries: boolean;
-}
+export type CodeVersion = VersionOption;
 
 export interface CodeClassState {
   class_name: string;
@@ -25,7 +19,7 @@ export interface SnapshotLine {
 }
 
 export interface SnapshotPayload {
-  class_name: string;
+  class_name: string | null;
   lines: SnapshotLine[];
 }
 
@@ -41,7 +35,7 @@ export interface DiffLine {
   text: string;
   line_old: number | null;
   line_new: number | null;
-  segments?: DiffSegment[];
+  segments: DiffSegment[] | null;
 }
 
 export interface DiffHunk {
@@ -74,12 +68,26 @@ export interface VersionDiffPayload {
   message?: string;
 }
 
+export interface ResolvedDepHash {
+  version_id: string | null;
+  source_hash: string;
+}
+
+export interface ResolvedSourceHash {
+  version_id: string;
+}
+
 export interface LoadingPayload {
   loading: true;
   fast: boolean;
 }
 
-export type VersionsResponse = { versions: CodeVersion[]; has_live_classes: boolean } | LoadingPayload;
+export interface VersionsPayload {
+  versions: CodeVersion[];
+  has_live_classes: boolean;
+}
+
+export type VersionsResponse = VersionsPayload | LoadingPayload;
 
 export function isLoading(r: VersionsResponse): r is LoadingPayload {
   return (r as LoadingPayload).loading === true;
@@ -102,7 +110,7 @@ export const codeApi = {
     const { ok, status, data } = await request('/api/code/versions');
     if (status === 202) return data as LoadingPayload;
     if (!ok) throw new Error(`codeApi.versions: ${status}`);
-    return data as { versions: CodeVersion[]; has_live_classes: boolean };
+    return data as VersionsPayload;
   },
 
   /** Per-class states at a version; omit version_id for the newest group. */
@@ -162,20 +170,20 @@ export const codeApi = {
   async resolveDepHash(
     depHash: string,
     className: string,
-  ): Promise<{ version_id: string | null; source_hash: string }> {
+  ): Promise<ResolvedDepHash> {
     const { ok, status, data } = await request(
       `/api/code/resolve-dep-hash?dep_hash=${encodeURIComponent(depHash)}&class_name=${encodeURIComponent(className)}`,
     );
     if (!ok) throw new Error(`codeApi.resolveDepHash: ${status}`);
-    return data as { version_id: string | null; source_hash: string };
+    return data as ResolvedDepHash;
   },
 
   /** Resolve a source_hash to the version group it belongs to. */
-  async sourceHashVersion(sourceHash: string): Promise<{ version_id: string }> {
+  async sourceHashVersion(sourceHash: string): Promise<ResolvedSourceHash> {
     const { ok, status, data } = await request(
       `/api/code/source-hash-version?source_hash=${encodeURIComponent(sourceHash)}`,
     );
     if (!ok) throw new Error(`codeApi.sourceHashVersion: ${status}`);
-    return data as { version_id: string };
+    return data as ResolvedSourceHash;
   },
 };

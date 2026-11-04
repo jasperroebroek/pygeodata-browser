@@ -1,59 +1,65 @@
 """Domain logic for the /api/code/* routes.
 
-Routes in web.py parse request args, call these functions, and jsonify the
+Routes in web.py parse request args, call these functions, and encode the
 result.  No Flask imports here.
 """
 
 from __future__ import annotations
 
+import re
 from difflib import SequenceMatcher, unified_diff
 
 from pygeodata.analysis import ProjectAnalysis
 from pygeodata.paths import CodeRegistryPathConstructor
+from pygeodata.registries.registry_types import CodeEvent
 from pygeodata.registries.versioning import VersionRegistry
 from pygeodata.static import read_class_source
 from pygeodata.views.types import CodeClassState
+from pygeodata_browser.contracts import (
+    DiffHunk,
+    DiffLine,
+    DiffPayload,
+    DiffSegment,
+    FullDiffPayload,
+    SnapshotLine,
+    SnapshotPayload,
+    VersionChange,
+    VersionDiff,
+    VersionDiffError,
+)
 from pygeodata_browser.entry_store import EntryStore
 
 
-def _word_segments(text_old: str, text_new: str) -> tuple[list[dict], list[dict]]:
-    """Compute word-level diff segments for a paired del/add line.
+def _tokenise(text: str) -> list[str]:
+    return re.findall(r'\w+|\W', text)
 
-    Returns (segments_old, segments_new) where each segment is
-    {'type': 'eq'|'del'|'ins', 'text': str}.
-    """
 
-    def tokenise(s: str) -> list[str]:
-        import re
-
-        return re.findall(r'\w+|\W', s)
-
-    tokens_old = tokenise(text_old)
-    tokens_new = tokenise(text_new)
+def _word_segments(text_old: str, text_new: str) -> tuple[list[DiffSegment], list[DiffSegment]]:
+    """Compute word-level diff segments for a paired del/add line."""
+    tokens_old = _tokenise(text_old)
+    tokens_new = _tokenise(text_new)
     matcher = SequenceMatcher(None, tokens_old, tokens_new, autojunk=False)
-    segs_old: list[dict] = []
-    segs_new: list[dict] = []
+    segs_old: list[DiffSegment] = []
+    segs_new: list[DiffSegment] = []
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         old_text = ''.join(tokens_old[i1:i2])
         new_text = ''.join(tokens_new[j1:j2])
         if tag == 'equal':
-            segs_old.append({'type': 'eq', 'text': old_text})
-            segs_new.append({'type': 'eq', 'text': new_text})
+            segs_old.append(DiffSegment('eq', old_text))
+            segs_new.append(DiffSegment('eq', new_text))
         elif tag == 'replace':
-            segs_old.append({'type': 'del', 'text': old_text})
-            segs_new.append({'type': 'ins', 'text': new_text})
+            segs_old.append(DiffSegment('del', old_text))
+            segs_new.append(DiffSegment('ins', new_text))
         elif tag == 'delete':
-            segs_old.append({'type': 'del', 'text': old_text})
+            segs_old.append(DiffSegment('del', old_text))
         elif tag == 'insert':
-            segs_new.append({'type': 'ins', 'text': new_text})
+            segs_new.append(DiffSegment('ins', new_text))
     return segs_old, segs_new
 
 
-def _build_structured_hunks(text_old: str, text_new: str) -> list[dict]:
+def _build_structured_hunks(text_old: str, text_new: str) -> list[DiffHunk]:
     """Parse a unified diff into structured hunks with line numbers and word segments.
 
-    Each hunk: {header, start_old, start_new, lines: [...]}.
-    Each line: {type, text, line_old, line_new, segments?}.
     Paired del/add lines (a del immediately followed by an add) get word segments.
     """
     raw_diff = ''.join(
@@ -65,8 +71,8 @@ def _build_structured_hunks(text_old: str, text_new: str) -> list[dict]:
         ),
     )
 
-    hunks: list[dict] = []
-    current_hunk: dict | None = None
+    hunks: list[DiffHunk] = []
+    current_hunk: DiffHunk | None = None
     line_old = 0
     line_new = 0
 
@@ -74,52 +80,58 @@ def _build_structured_hunks(text_old: str, text_new: str) -> list[dict]:
         if raw.startswith('--- ') or raw.startswith('+++ '):
             continue
         if raw.startswith('@@'):
-            import re
-
             m = re.match(r'@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@', raw)
             line_old = int(m.group(1)) if m else 1
             line_new = int(m.group(2)) if m else 1
-            current_hunk = {'header': raw, 'start_old': line_old, 'start_new': line_new, 'lines': []}
+            current_hunk = DiffHunk(header=raw, start_old=line_old, start_new=line_new, lines=[])
             hunks.append(current_hunk)
         elif current_hunk is not None:
             if raw.startswith('+'):
-                current_hunk['lines'].append({'type': 'add', 'text': raw[1:], 'line_old': None, 'line_new': line_new})
+                current_hunk.lines.append(DiffLine('add', raw[1:], line_old=None, line_new=line_new))
                 line_new += 1
             elif raw.startswith('-'):
-                current_hunk['lines'].append({'type': 'del', 'text': raw[1:], 'line_old': line_old, 'line_new': None})
+                current_hunk.lines.append(DiffLine('del', raw[1:], line_old=line_old, line_new=None))
                 line_old += 1
             elif raw != '\\ No newline at end of file':
-                current_hunk['lines'].append(
-                    {'type': 'ctx', 'text': raw[1:], 'line_old': line_old, 'line_new': line_new},
-                )
+                current_hunk.lines.append(DiffLine('ctx', raw[1:], line_old=line_old, line_new=line_new))
                 line_old += 1
                 line_new += 1
 
     # Pair consecutive del+add lines and add word segments
     for hunk in hunks:
-        lines = hunk['lines']
+        lines = hunk.lines
         i = 0
         while i < len(lines):
-            if lines[i]['type'] == 'del':
+            if lines[i].type == 'del':
                 # Collect run of dels then run of adds
                 j = i
-                while j < len(lines) and lines[j]['type'] == 'del':
+                while j < len(lines) and lines[j].type == 'del':
                     j += 1
                 k = j
-                while k < len(lines) and lines[k]['type'] == 'add':
+                while k < len(lines) and lines[k].type == 'add':
                     k += 1
                 dels = lines[i:j]
                 adds = lines[j:k]
                 pairs = min(len(dels), len(adds))
                 for p in range(pairs):
-                    segs_old, segs_new = _word_segments(dels[p]['text'], adds[p]['text'])
-                    dels[p]['segments'] = segs_old
-                    adds[p]['segments'] = segs_new
+                    dels[p].segments, adds[p].segments = _word_segments(dels[p].text, adds[p].text)
                 i = k
             else:
                 i += 1
 
     return hunks
+
+
+def version_changes(events: list[CodeEvent]) -> list[VersionChange]:
+    return [
+        VersionChange(
+            class_name=e.class_name,
+            status=e.status,
+            hash_old=e.state_old.source_hash if e.state_old else None,
+            hash_new=e.state_new.source_hash if e.state_new else None,
+        )
+        for e in events
+    ]
 
 
 def version_classes(version_id: str, vreg: VersionRegistry, analysis: ProjectAnalysis) -> list[CodeClassState]:
@@ -171,11 +183,8 @@ def _source_text(source_hash: str, vreg: VersionRegistry, analysis: ProjectAnaly
     return (text, record.facts.name) if text is not None else None
 
 
-def snapshot_html(source_hash: str, vreg: VersionRegistry, analysis: ProjectAnalysis) -> dict | None:
-    """Return {'class_name': ..., 'lines': [...]} for the given source hash.
-
-    Returns None if the snapshot is not found (caller should abort(404)).
-    """
+def snapshot_html(source_hash: str, vreg: VersionRegistry, analysis: ProjectAnalysis) -> SnapshotPayload | None:
+    """Return the source lines for the given hash, or None if the snapshot is not found (caller should abort(404))."""
     src = vreg.source_registry
     found = _source_text(source_hash, vreg, analysis)
     if found is None:
@@ -184,10 +193,10 @@ def snapshot_html(source_hash: str, vreg: VersionRegistry, analysis: ProjectAnal
     source_text, class_name = found
     known_classes = frozenset(analysis.classes) | frozenset(src.class_names)
     lines = [
-        {'text': line, 'cls_link': line.strip() if line.strip() in known_classes else None}
+        SnapshotLine(text=line, cls_link=line.strip() if line.strip() in known_classes else None)
         for line in source_text.splitlines()
     ]
-    return {'class_name': class_name, 'lines': lines}
+    return SnapshotPayload(class_name=class_name, lines=lines)
 
 
 def diff_hashes(
@@ -196,22 +205,18 @@ def diff_hashes(
     full: bool,
     vreg: VersionRegistry,
     analysis: ProjectAnalysis,
-) -> dict | None:
-    """Return structured diff payload or None if either file is missing.
-
-    Returns {'hunks': [...], 'full_old'?: str, 'full_new'?: str}.
-    """
+) -> DiffPayload | None:
+    """Return the structured diff (with both full texts when ``full``) or None if either file is missing."""
     old = _source_text(hash_old, vreg, analysis)
     new = _source_text(hash_new, vreg, analysis)
     if old is None or new is None:
         return None
     text_old, text_new = old[0], new[0]
 
-    result: dict = {'hunks': _build_structured_hunks(text_old, text_new)}
+    hunks = _build_structured_hunks(text_old, text_new)
     if full:
-        result['full_old'] = text_old
-        result['full_new'] = text_new
-    return result
+        return FullDiffPayload(hunks=hunks, full_old=text_old, full_new=text_new)
+    return DiffPayload(hunks=hunks)
 
 
 def unified_diff_payload(
@@ -221,7 +226,7 @@ def unified_diff_payload(
     assert_allowed_path: callable,
     vreg: VersionRegistry,
     analysis: ProjectAnalysis,
-) -> dict | None:
+) -> DiffPayload | None:
     """HTTP-boundary wrapper around diff_hashes that enforces the path guard.
 
     ``assert_allowed_path`` is the guard from web.py; calling it here keeps
@@ -241,7 +246,7 @@ def version_diff(
     entries: EntryStore | None = None,
     base_version_id: str | None = None,
     target_version_id: str = 'live',
-) -> dict:
+) -> VersionDiff | VersionDiffError | None:
     """Compare two version snapshots and return a complete diff payload.
 
     base_version_id is resolved in order:
@@ -250,8 +255,7 @@ def version_diff(
     target_version_id defaults to 'live' (the project's current code).
     Either base or target may be 'live'.
 
-    Returns {changes, base_version_id, has_live_stale} or an error dict.
-    Never raises — errors are encoded as {'error': ..., 'message': ...}.
+    Returns None when ``record_id`` is unknown (caller should abort(404)); other failures are a ``VersionDiffError``.
     """
 
     def _resolve(version_id: str) -> dict[str, str] | None:
@@ -265,13 +269,13 @@ def version_diff(
     resolved_base_id = base_version_id
     if resolved_base_id is None:
         if record_id is None or entries is None:
-            return {'error': 'bad_request', 'message': 'base_version_id or record_id required'}
+            return VersionDiffError('bad_request', 'base_version_id or record_id required')
         entry = entries.get(record_id)
         if entry is None:
-            return {'__not_found__': True}
+            return None
         dep_hash = entry.dep_hash
         if not dep_hash:
-            return {'error': 'no_snapshot', 'message': 'Snapshot not available for this entry'}
+            return VersionDiffError('no_snapshot', 'Snapshot not available for this entry')
         version = vreg.dep_hash_to_version.get(dep_hash)
         resolved_base_id = version.version_id if version else None
 
@@ -279,13 +283,12 @@ def version_diff(
     target = _resolve(target_version_id)
 
     if base is None:
-        return {'error': 'no_snapshot', 'message': 'Base version not found'}
+        return VersionDiffError('no_snapshot', 'Base version not found')
     if target is None:
-        return {'error': 'no_snapshot', 'message': 'Target version not found'}
+        return VersionDiffError('no_snapshot', 'Target version not found')
 
-    changes = [e.to_dict() for e in vreg.compare_versions(base, target, analysis.facts.get)]
-    return {
-        'changes': changes,
-        'base_version_id': resolved_base_id,
-        'has_live_stale': vreg.has_live_stale(analysis.facts.get),
-    }
+    return VersionDiff(
+        changes=version_changes(vreg.compare_versions(base, target, analysis.facts.get)),
+        base_version_id=resolved_base_id,
+        has_live_stale=vreg.has_live_stale(analysis.facts.get),
+    )

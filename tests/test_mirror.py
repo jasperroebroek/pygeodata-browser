@@ -215,10 +215,10 @@ def test_entries_of_an_empty_cache_root_are_offline(tmp_path: Path, user_dirs: P
         shutil.rmtree(get_config().path_figures / FIGURE)  # the figures root is left empty
         ctx, client = serve(root)
 
-        catalog = ctx.state.catalog.payload()
+        catalog = ctx.state.catalog.info()
         figures = str(get_config().path_figures)
-        assert [(r['path'], r['name'], r['entries']) for r in catalog['unavailable_roots']] == [(figures, 'figures', 1)]
-        assert ctx.state.diagnostics['offline_entries'] == 1
+        assert [(r.path, r.name, r.entries) for r in catalog.unavailable_roots] == [(figures, 'figures', 1)]
+        assert ctx.state.diagnostics.offline_entries == 1
 
         rows = client.get('/api/class-entries?classes=Plot,Loader').get_json()['table_rows']
         assert {r['record_id']: r['offline_root'] for r in rows} == {DATA: None, FIGURE: figures}
@@ -247,7 +247,7 @@ def test_a_present_root_marks_nothing_offline(tmp_path: Path, user_dirs: Path, s
     project = make_project(tmp_path / 'proj')
     with configure(project):
         ctx, client = serve(project)
-        assert ctx.state.catalog.payload()['unavailable_roots'] == []
+        assert ctx.state.catalog.info().unavailable_roots == []
         rows = client.get('/api/class-entries?classes=Plot').get_json()['table_rows']
         assert rows[0]['offline_root'] is None
 

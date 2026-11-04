@@ -295,16 +295,19 @@
               <button class="act-btn" disabled={!!e.offline_root} onclick={() => openFilePopup(e.params_path)}>Params</button>
             {/if}
             {#if e.state_hash_path}
-              <button class="act-btn" disabled={!!e.offline_root} onclick={() => openFilePopup(e.state_hash_path)}>Hash</button>
+              {@const path = e.state_hash_path}
+              <button class="act-btn" disabled={!!e.offline_root} onclick={() => openFilePopup(path)}>Hash</button>
             {/if}
             {#if e.execution_graph_path}
-              <button class="act-btn" disabled={!!e.offline_root} onclick={() => openFilePopup(e.execution_graph_path)}>Graph</button>
+              {@const path = e.execution_graph_path}
+              <button class="act-btn" disabled={!!e.offline_root} onclick={() => openFilePopup(path)}>Graph</button>
             {/if}
             {@render hdSep()}
           {/if}
           {#if e.state_hash}
-            <button class="act-btn act-btn--mono" title={e.state_hash} onclick={() => copyText(e.state_hash, 'Hash copied')}>
-              {e.state_hash.slice(0, 6)}
+            {@const hash = e.state_hash}
+            <button class="act-btn act-btn--mono" title={hash} onclick={() => copyText(hash, 'Hash copied')}>
+              {hash.slice(0, 6)}
             </button>
             {@render hdSep()}
           {/if}

@@ -20,18 +20,11 @@ from pygeodata.catalog.types import CatalogEntry, CatalogHeader, Pin
 from pygeodata.config import get_config
 from pygeodata.fileio import read_typed_json, write_typed_json_atomic
 from pygeodata.registries.registry import EntryRegistry
+from pygeodata_browser.contracts import CatalogInfo, UnavailableRoot
 
 APP_NAME = 'pygeodata-browser'
 
 _pins_lock = threading.Lock()
-
-
-@dataclass(frozen=True)
-class UnavailableRoot:
-    path: str
-    name: str
-    entries: int
-    since: float
 
 
 def local_key(header: CatalogHeader) -> str:
@@ -136,24 +129,15 @@ class CatalogContext:
         except (OSError, msgspec.DecodeError):
             return []
 
-    def payload(self) -> dict:
-        writer = self.header.writer
-        return {
-            'mode': 'mirror' if self.read_only else 'writable',
-            'read_only': self.read_only,
-            'reason': self.reason,
-            'catalog_id': self.header.catalog_id,
-            'writer': {
-                'root': writer.root,
-                'host': writer.host,
-                'written_at': writer.written_at,
-                'pygeodata': writer.pygeodata,
-                'python': writer.python,
-            },
-            'pins_path': str(self.pins_path),
-            'thumbs_path': str(self.thumbs_dir),
-            'absolute_dir_entries': self.absolute_dir_entries,
-            'unavailable_roots': [
-                {'path': r.path, 'name': r.name, 'entries': r.entries, 'since': r.since} for r in self.unavailable_roots
-            ],
-        }
+    def info(self) -> CatalogInfo:
+        return CatalogInfo(
+            mode='mirror' if self.read_only else 'writable',
+            read_only=self.read_only,
+            reason=self.reason,
+            catalog_id=self.header.catalog_id,
+            writer=self.header.writer,
+            pins_path=str(self.pins_path),
+            thumbs_path=str(self.thumbs_dir),
+            absolute_dir_entries=self.absolute_dir_entries,
+            unavailable_roots=self.unavailable_roots,
+        )
