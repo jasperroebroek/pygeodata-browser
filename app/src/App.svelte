@@ -6,7 +6,6 @@
     navigateForward,
     selectAdjacentEntry,
     selection,
-    startReload,
     ui,
   } from './lib/stores.svelte';
   import { toasts } from './lib/toast.svelte';
@@ -18,7 +17,6 @@
   import QuickSwitcher from './components/QuickSwitcher.svelte';
   import ReloadBar from './components/ReloadBar.svelte';
   import StatusNotice from './components/StatusNotice.svelte';
-  import ErrorBox from './components/ErrorBox.svelte';
   import { palette } from './lib/palette.svelte';
   import Resizer from './components/Resizer.svelte';
   import CodeView from './views/CodeView.svelte';
@@ -62,9 +60,6 @@
     e.preventDefault();
     void selectAdjacentEntry(e.key === 'ArrowDown' ? 1 : -1);
   }
-
-  // closing the first-load error reveals the (empty) app; a different error shows again
-  let dismissedLoadError = $state<string | null>(null);
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -99,18 +94,9 @@
 
 {#if palette.open}<QuickSwitcher />{/if}
 
-{#if ui.loading && ui.overlay && !(ui.loadError && ui.loadError === dismissedLoadError)}
+{#if ui.loading && ui.overlay}
   <div class="loading-overlay">
-    {#if ui.loadError}
-      <ErrorBox
-        title="Loading failed"
-        message={ui.loadError}
-        onRetry={() => void startReload()}
-        onClose={() => (dismissedLoadError = ui.loadError)}
-      />
-    {:else}
-      <div class="loading-box"><div class="loading-label">Loading entries…</div></div>
-    {/if}
+    <div class="loading-box"><div class="loading-label">Loading entries…</div></div>
   </div>
 {/if}
 
