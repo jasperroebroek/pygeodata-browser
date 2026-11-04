@@ -9,11 +9,11 @@ from __future__ import annotations
 from difflib import SequenceMatcher, unified_diff
 
 from pygeodata.ast import get_source_code
-from pygeodata.catalog.types import CodeClassState
 from pygeodata.hash import calculate_cls_source_hash
 from pygeodata.paths import CodeRegistryPathConstructor
 from pygeodata.registries.versioning import VersionRegistry
 from pygeodata.tracked_object import TrackedObject
+from pygeodata.views.types import CodeClassState
 
 
 def _word_segments(text_old: str, text_new: str) -> tuple[list[dict], list[dict]]:

@@ -4,11 +4,13 @@ import json
 from pathlib import Path
 
 import pytest
-from pygeodata.catalog.types import EntryInfo, SpecInfo
-from pygeodata.config import JSONKeys, set_config
+from pygeodata.config import set_config
+from pygeodata.enums import JSONKeys
 from pygeodata.registries.versioning import VersionRegistry
 from pygeodata.tracked_object import TrackedObject
+from pygeodata.views.types import SpecInfo
 from pygeodata_browser import code_service
+from pygeodata_browser.models import EntryInfo
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -45,14 +47,12 @@ def _make_entry(record_id: str, dep_hash: str | None, params_path: str = '') -> 
         class_name='MyLoader',
         object_type='Data',
         params_path=params_path,
-        spec_path=None,
         state_hash_path=None,
         execution_graph_path=None,
         state_hash=None,
         instance_hash=None,
         params_hash=None,
         spec_hash=None,
-        params={},
         spec=SpecInfo(),
         rows=[],
         dep_hash=dep_hash,

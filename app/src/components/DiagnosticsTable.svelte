@@ -3,6 +3,7 @@
 
   const counts = $derived(classesState.counts);
   const diag = $derived(classesState.diagnostics);
+  const unavailableRoots = $derived((diag.unavailable_roots ?? []) as unknown as string[]);
 
   const sections = $derived([
     {
@@ -16,14 +17,15 @@
     {
       title: 'Scan',
       rows: [
-        { label: 'Params files scanned', value: diag.scanned_hash_paths ?? 0 },
         { label: 'Entries created', value: diag.created_entries ?? 0 },
+        { label: 'Unindexed entry dirs', value: diag.unindexed_dirs ?? 0, warn: true },
       ],
     },
     {
       title: 'Entry quality',
       rows: [
-        { label: 'Missing state hash', value: diag.missing_state_hash ?? 0, warn: true },
+        { label: 'Missing entry dirs', value: diag.missing_dirs ?? 0, warn: true },
+        { label: 'Unavailable cache roots', value: unavailableRoots.length, warn: true },
         ...((diag.stale_hidden ?? 0) > 0 ? [{ label: 'Stale entries hidden', value: diag.stale_hidden }] : []),
       ],
     },

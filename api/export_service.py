@@ -5,15 +5,15 @@ import tempfile
 import threading
 from pathlib import Path
 
-from pygeodata.catalog.export import collect_export_files, single_entry_tar_path, write_export_tar
+from pygeodata.archive import collect_export_files, entry_download, write_export_tar
 
 __all__ = [
     'collect_export_files',
     'create_job',
+    'entry_download',
     'get_job',
     'pop_job',
     'run_export_job',
-    'single_entry_tar_path',
 ]
 
 # ---------------------------------------------------------------------------

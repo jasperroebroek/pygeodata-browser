@@ -8,49 +8,17 @@ Covers:
 - reload reconciles the catalog before rebuilding state.
 """
 
-import json
 import shutil
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from pygeodata.config import (
-    FORMAT_VERSION,
-    JSONKeys,
-    set_config,
-)
-from pygeodata.paths import CachePathConstructor
+from conftest import write_entry
+from pygeodata.config import set_config
 from pygeodata.registries.registry import EntryRegistry
 from pygeodata.tracked_object import TrackedObject
 from pygeodata_browser import state
 from pygeodata_browser.state import AppContext
-
-
-def _write_hash_file(
-    directory: Path,
-    stem: str,
-    state_hash: str = 'abc123',
-    instance_hash: str = 'inst001',
-    object_type: str = 'Data',
-) -> Path:
-    """Write minimal cache files for one entry. Returns the hash file path."""
-    directory.mkdir(parents=True, exist_ok=True)
-    resolver = CachePathConstructor(directory)
-    resolver.state_hash_path.write_text(
-        json.dumps(
-            {
-                JSONKeys.STATE_HASH: state_hash,
-                JSONKeys.INSTANCE_HASH: instance_hash,
-                JSONKeys.CLASS_NAME: stem,
-                JSONKeys.OBJECT_TYPE: object_type,
-                JSONKeys.FORMAT_VERSION: FORMAT_VERSION,
-                JSONKeys.DEPENDENCY_TREE_HASH: '',
-                JSONKeys.CO_OUTPUTS: [],
-            },
-        ),
-    )
-    resolver.params_path.write_text('{}')
-    return resolver.state_hash_path
 
 
 @pytest.fixture(autouse=True)
@@ -103,11 +71,10 @@ def test_load_error_cleared_on_success(tmp_path: Path) -> None:
 
 def test_delete_then_reload_completes(tmp_path: Path) -> None:
     """Simulates the bug: rmtree an entry dir → reload must finish (not hang)."""
-    cache_dir = tmp_path / 'data_processed' / 'MyClass' / 'run1'
-    _write_hash_file(cache_dir, 'MyClass', state_hash='del001', instance_hash='i001')
+    cache_dir = write_entry(tmp_path / 'data_processed', 'del001', 'MyClass')
 
     reg = EntryRegistry()
-    assert 'del001' in reg.records
+    assert 'del001' in reg.entries
 
     shutil.rmtree(cache_dir)
 
@@ -133,8 +100,7 @@ def test_rebuild_picks_up_new_entry(tmp_path: Path) -> None:
     assert ctx.state is not None
     initial_count = len(ctx.state.entries)
 
-    cache_dir = tmp_path / 'data_processed' / 'NewClass' / 'run1'
-    _write_hash_file(cache_dir, 'NewClass', state_hash='new001', instance_hash='i002')
+    write_entry(tmp_path / 'data_processed', 'new001', 'NewClass')
 
     ctx.start_reload()
     ctx.ready.wait(timeout=10)
@@ -201,7 +167,7 @@ def test_reconcile_periodic_swaps_when_catalog_changed(tmp_path: Path) -> None:
         state._remember_catalog()
         state._remember_code()
 
-        store.save_catalog(store.load_catalog())
+        store.open_catalog(read_only=False)
 
         with patch.object(ctx, 'swap_state') as swap:
             state.reconcile_periodic(ctx, reimport=False)

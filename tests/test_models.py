@@ -1,29 +1,27 @@
 import pytest
-from pygeodata.catalog.types import SpecInfo
-from pygeodata.spec import SpatialSpec, format_resolution
+from pygeodata.records import SpecRecord
+from pygeodata.spec import format_resolution
+from pygeodata.views.types import SpecInfo, spec_info
 
 
-def _spec(crs=None, bounds=None, resolution=None, shape=None) -> SpecInfo:
-    """Build a SpecInfo via the full SpatialSpec → from_spec path."""
+def _spec(crs=None, bounds=None, resolution=None) -> SpecInfo:
+    """Build a SpecInfo from a SpecRecord."""
     from affine import Affine
-    from pyproj import CRS
 
     if crs is None and bounds is None and resolution is None:
         return SpecInfo()
 
-    crs_obj = CRS.from_user_input(crs) if crs else CRS.from_epsg(4326)
+    crs = crs or 'EPSG:4326'
 
     if resolution is not None and bounds is not None:
-        # Build a transform from bounds + resolution
         res_x, res_y = (resolution, resolution) if isinstance(resolution, (int, float)) else resolution
         xmin, ymin, xmax, ymax = bounds
         transform = Affine(res_x, 0, xmin, 0, -res_y, ymax)
         rows = int((ymax - ymin) / res_y)
         cols = int((xmax - xmin) / res_x)
-        return SpecInfo.from_spec(SpatialSpec(crs=crs_obj, transform=transform, shape=(rows, cols)))
+        return spec_info(SpecRecord(crs=crs, transform=transform, shape=(rows, cols)))
 
-    # Just CRS, no transform
-    return SpecInfo.from_spec(SpatialSpec(crs=crs_obj))
+    return spec_info(SpecRecord(crs=crs))
 
 
 def test_spec_info_from_spec_minimal() -> None:
@@ -62,10 +60,7 @@ def test_spec_info_bounds_latlon_epsg4326() -> None:
 
 def test_spec_info_bounds_latlon_none_when_no_transform_no_area() -> None:
     # No transform → bounds is None → bounds_latlon is None
-    from pygeodata.spec import SpatialSpec
-    from pyproj import CRS
-
-    info = SpecInfo.from_spec(SpatialSpec(crs=CRS.from_epsg(4326)))
+    info = spec_info(SpecRecord(crs='EPSG:4326'))
     assert info.bounds_latlon is None
 
 

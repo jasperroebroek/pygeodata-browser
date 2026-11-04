@@ -24,6 +24,7 @@ from flask import (
 )
 from pygeodata.cache import clean_cache, clean_source_registry
 from pygeodata.catalog import store
+from pygeodata.catalog.types import CatalogData, CatalogEntry
 from pygeodata.config import get_config
 from pygeodata.tracked_object import TrackedObject
 from pygeodata_browser import code_service, export_service, payloads
@@ -78,7 +79,7 @@ def _assert_allowed_path(path_str: str) -> Path | None:
 
 
 def _path_allowed(path_str: str) -> bool:
-    """Adapt _assert_allowed_path to the bool-returning contract catalog/export.py expects.
+    """Adapt _assert_allowed_path to the bool-returning contract pygeodata.archive expects.
 
     Export treats a boundary violation like any other skippable entry (one
     bad entry shouldn't sink the whole export), unlike _assert_allowed_path's
@@ -107,11 +108,26 @@ def app_asset(filename: str) -> Response:
     return send_from_directory(_APP_DIST / 'assets', filename)
 
 
+def _bootstrap_row(entry: CatalogEntry) -> dict:
+    rec = entry.record
+    return {
+        'state_hash': rec.state_hash,
+        'class_name': rec.class_name,
+        'object_type': rec.object_type,
+        'source_hash': rec.source_hash,
+        'dependency_tree_hash': rec.dependency_tree_hash,
+        'instance_hash': rec.instance_hash,
+        'params_hash': rec.params_hash,
+        'spec_hash': rec.spec_hash,
+        'created_at': entry.created_at,
+    }
+
+
 @app.get('/api/bootstrap')
 def api_bootstrap() -> Response:
     """Most recent entry per class — served instantly while the full state builds."""
     try:
-        rows = store.bootstrap_rows(store.load_catalog())
+        rows = [_bootstrap_row(e) for e in store.bootstrap_rows(CatalogData.from_file(store.catalog_path()))]
     except Exception:  # noqa: BLE001 — bootstrap is best-effort; the full load follows
         rows = []
     return jsonify(rows)
@@ -361,7 +377,7 @@ def api_delete_entry(record_id: str):
     entry = _ctx.state.entries.get(record_id)
     if entry is None:
         abort(404)
-    cache_dir = Path(entry.params_path).parent
+    cache_dir = entry.entry_dir
     _assert_allowed_path(str(cache_dir))
     if cache_dir.exists():
         shutil.rmtree(cache_dir)
@@ -571,7 +587,7 @@ def api_export_start():
 
     files, warnings = export_service.collect_export_files(
         record_ids,
-        _ctx.state.entries,
+        _ctx.state.entry_registry,
         include_snapshots,
         _path_allowed,
         tree_registry=_ctx.state.version_registry.tree_registry,
@@ -664,22 +680,18 @@ def api_export_single(record_id: str):
     if _ctx.is_loading() or _ctx.state is None:
         return _loading()
 
-    data_path, download_name, needs_tar = export_service.single_entry_tar_path(
-        record_id,
-        _ctx.state.entries,
-        _path_allowed,
-    )
-    if data_path is None:
+    download = export_service.entry_download(record_id, _ctx.state.entry_registry, _path_allowed)
+    if download is None:
         abort(404)
 
-    if needs_tar:
+    if download.needs_tar:
         tmp_fd, tmp_name = tempfile.mkstemp(suffix='.tar')
         os.close(tmp_fd)
         with tarfile.open(tmp_name, 'w:') as tar:
-            tar.add(data_path, arcname=data_path.name)
-        return send_file(tmp_name, as_attachment=True, download_name=download_name)
+            tar.add(download.path, arcname=download.path.name)
+        return send_file(tmp_name, as_attachment=True, download_name=download.name)
 
-    return send_file(data_path, as_attachment=True, download_name=download_name)
+    return send_file(download.path, as_attachment=True, download_name=download.name)
 
 
 def create_app(

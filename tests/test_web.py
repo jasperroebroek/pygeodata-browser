@@ -3,8 +3,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from conftest import write_entry
 from pygeodata.config import set_config
+from pygeodata.registries.registry import EntryRegistry
 from pygeodata.registries.versioning import VersionRegistry
+from pygeodata.views.types import SpecInfo
+from pygeodata_browser.models import EntryInfo
 from pygeodata_browser.state import AppContext, AppState
 from pygeodata_browser.web import _allowed_roots, _assert_allowed_path
 from pygeodata_browser.web import app as flask_app
@@ -299,7 +303,11 @@ def test_api_code_resolve_dep_hash(tmp_path: Path) -> None:
                     'MyLoader': {'hash': 'v1hash', 'object_type': 'Data'},
                     'MyDep': {'hash': 'dep1hash', 'object_type': 'Data'},
                 },
-                'tree': {},
+                'dependency_tree_hash': 'snapshot_old',
+                'call_edges': [],
+                'inheritance_edges': [],
+                'root_class': 'MyLoader',
+                'registered_at': '2026-01-01T00:00:00+00:00',
             },
         ),
         encoding='utf-8',
@@ -457,21 +465,17 @@ def test_api_code_diff_identical_files(tmp_path: Path) -> None:
 
 def _make_entry(record_id: str, dep_hash: str | None):
     """Minimal EntryInfo for version-diff tests."""
-    from pygeodata.catalog.types import EntryInfo, SpecInfo
-
     return EntryInfo(
         record_id=record_id,
         class_name='MyLoader',
         object_type='Data',
         params_path='',
-        spec_path=None,
         state_hash_path=None,
         execution_graph_path=None,
         state_hash=None,
         instance_hash=None,
         params_hash=None,
         spec_hash=None,
-        params={},
         spec=SpecInfo(),
         rows=[],
         dep_hash=dep_hash,
@@ -517,7 +521,11 @@ def test_api_code_version_diff_returns_changes(tmp_path: Path) -> None:
         json.dumps(
             {
                 'nodes': {'MyLoader': {'hash': 'v1hash', 'object_type': 'Data'}},
-                'tree': {},
+                'dependency_tree_hash': 'snapshot1',
+                'call_edges': [],
+                'inheritance_edges': [],
+                'root_class': 'MyLoader',
+                'registered_at': '2026-01-01T00:00:00+00:00',
             },
         ),
         encoding='utf-8',
@@ -582,28 +590,6 @@ def test_api_code_version_diff_explicit_base(tmp_path: Path) -> None:
 # --- /api/export/* ---
 
 
-def _make_entry_with_path(record_id: str, params_path: str, dep_hash: str | None = None):
-    from pygeodata.catalog.types import EntryInfo, SpecInfo
-
-    return EntryInfo(
-        record_id=record_id,
-        class_name='MyLoader',
-        object_type='Data',
-        params_path=params_path,
-        spec_path=None,
-        state_hash_path=None,
-        execution_graph_path=None,
-        state_hash=record_id,
-        instance_hash=None,
-        params_hash=None,
-        spec_hash=None,
-        params={},
-        spec=SpecInfo(),
-        rows=[],
-        dep_hash=dep_hash,
-    )
-
-
 def _run_export(client, record_ids, include_snapshots=False):
     """Helper: start → poll until complete → download. Returns (tar_names, download_resp)."""
     import io
@@ -639,24 +625,15 @@ def test_api_export_while_loading(client) -> None:
 
 def test_api_export_returns_tar(tmp_path: Path) -> None:
     cache_root = tmp_path / 'data_processed'
-    cache_dir = cache_root / 'abc123'
-    from pygeodata.paths import CachePathConstructor
-
-    cache_dir.mkdir(parents=True)
-    resolver = CachePathConstructor(cache_dir)
-    resolver.params_path.write_text('{}')
-    resolver.state_hash_path.write_text('{}')
-    (cache_dir / 'output.tif').write_bytes(b'TIFFDATA')
-
-    entry = _make_entry_with_path('abc123', str(resolver.params_path))
+    (write_entry(cache_root, 'abc123') / 'output.tif').write_bytes(b'TIFFDATA')
     ctx = _make_ready_ctx()
-    ctx.state.entries = {'abc123': entry}
 
     with set_config(
         path_cache=cache_root,
         path_figures=tmp_path / 'figures',
         path_registry=tmp_path / '.source',
     ):
+        ctx.state.entry_registry = EntryRegistry()
         flask_app.config['TESTING'] = True
         with patch('pygeodata_browser.web._ctx', ctx):
             names = _run_export(flask_app.test_client(), ['abc123'], include_snapshots=False)
@@ -671,13 +648,6 @@ def test_api_export_returns_tar(tmp_path: Path) -> None:
 def test_api_export_includes_snapshots(tmp_path: Path) -> None:
     registry = tmp_path / '.source'
     cache_root = tmp_path / 'data_processed'
-    cache_dir = cache_root / 'abc123'
-    from pygeodata.paths import CachePathConstructor
-
-    cache_dir.mkdir(parents=True)
-    resolver = CachePathConstructor(cache_dir)
-    resolver.params_path.write_text('{}')
-
     src_hash = 'srchash1'
     code_dir = registry / 'code' / src_hash
     code_dir.mkdir(parents=True)
@@ -688,18 +658,27 @@ def test_api_export_includes_snapshots(tmp_path: Path) -> None:
     snapshot_dir = registry / 'snapshots' / dep_hash
     snapshot_dir.mkdir(parents=True)
     (snapshot_dir / 'tree.json').write_text(
-        json.dumps({'nodes': {'MyLoader': {'hash': src_hash, 'object_type': 'Data'}}, 'tree': {}}),
+        json.dumps(
+            {
+                'dependency_tree_hash': dep_hash,
+                'nodes': {'MyLoader': {'hash': src_hash, 'object_type': 'Data'}},
+                'call_edges': [],
+                'inheritance_edges': [],
+                'root_class': 'MyLoader',
+                'registered_at': '2026-01-01T00:00:00+00:00',
+            },
+        ),
     )
 
-    entry = _make_entry_with_path('abc123', str(resolver.params_path), dep_hash=dep_hash)
+    write_entry(cache_root, 'abc123', dep_hash=dep_hash)
     ctx = _make_ready_ctx()
-    ctx.state.entries = {'abc123': entry}
 
     with set_config(
         path_cache=cache_root,
         path_figures=tmp_path / 'figures',
         path_registry=registry,
     ):
+        ctx.state.entry_registry = EntryRegistry()
         flask_app.config['TESTING'] = True
         with patch('pygeodata_browser.web._ctx', ctx):
             names = _run_export(flask_app.test_client(), ['abc123'], include_snapshots=True)
@@ -712,13 +691,13 @@ def test_api_export_includes_snapshots(tmp_path: Path) -> None:
 
 def test_api_export_skips_unknown_record_ids(tmp_path: Path) -> None:
     ctx = _make_ready_ctx()
-    ctx.state.entries = {}
 
     with set_config(
         path_cache=tmp_path / 'data_processed',
         path_figures=tmp_path / 'figures',
         path_registry=tmp_path / '.source',
     ):
+        ctx.state.entry_registry = EntryRegistry()
         flask_app.config['TESTING'] = True
         with patch('pygeodata_browser.web._ctx', ctx):
             names = _run_export(flask_app.test_client(), ['doesnotexist'])

@@ -1,36 +1,18 @@
 """Unit tests for pygeodata_browser/export_service.py."""
 
 import json
+import shutil
 from pathlib import Path
 
-from pygeodata.catalog.types import EntryInfo, SpecInfo
-from pygeodata.config import JSONKeys, set_config
-from pygeodata.paths import CachePathConstructor
+from conftest import write_entry
+from pygeodata.config import set_config
+from pygeodata.enums import JSONKeys
+from pygeodata.registries.registry import EntryRegistry
 from pygeodata_browser import export_service
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _make_entry(record_id: str, params_path: str, dep_hash: str | None = None) -> EntryInfo:
-    return EntryInfo(
-        record_id=record_id,
-        class_name='MyLoader',
-        object_type='Data',
-        params_path=params_path,
-        spec_path=None,
-        state_hash_path=None,
-        execution_graph_path=None,
-        state_hash=record_id,
-        instance_hash=None,
-        params_hash=None,
-        spec_hash=None,
-        params={},
-        spec=SpecInfo(),
-        rows=[],
-        dep_hash=dep_hash,
-    )
 
 
 def _noop_allowed(_path_str: str) -> bool:
@@ -49,19 +31,13 @@ def _rejecting_allowed(_path_str: str) -> bool:
 def test_collect_cache_files(tmp_path: Path) -> None:
     registry = tmp_path / '.source'
     cache_root = tmp_path / 'data'
-    cache_dir = cache_root / 'abc'
-
-    cache_dir.mkdir(parents=True)
-    (cache_dir / 'output.tif').write_bytes(b'TIFF')
-    resolver = CachePathConstructor(cache_dir)
-    resolver.params_path.write_text('{}')
-
-    entry = _make_entry('abc', str(resolver.params_path))
+    (write_entry(cache_root, 'abc') / 'output.tif').write_bytes(b'TIFF')
 
     with set_config(path_cache=cache_root, path_figures=tmp_path / 'figs', path_registry=registry):
+        reg = EntryRegistry()
         files, warnings = export_service.collect_export_files(
             ['abc'],
-            {'abc': entry},
+            reg,
             include_snapshots=False,
             path_allowed=_noop_allowed,
         )
@@ -77,10 +53,6 @@ def test_collect_cache_files(tmp_path: Path) -> None:
 def test_collect_snapshot_and_code_members(tmp_path: Path) -> None:
     registry = tmp_path / '.source'
     cache_root = tmp_path / 'data'
-    cache_dir = cache_root / 'abc'
-    cache_dir.mkdir(parents=True)
-    (cache_dir / 'output.tif').write_bytes(b'TIFF')
-
     src_hash = 'src001'
     code_dir = registry / 'code' / src_hash
     code_dir.mkdir(parents=True)
@@ -103,17 +75,22 @@ def test_collect_snapshot_and_code_members(tmp_path: Path) -> None:
         json.dumps(
             {
                 JSONKeys.NODES: {'MyLoader': {'hash': src_hash, 'object_type': 'Data'}},
-                JSONKeys.TREE: {},
+                JSONKeys.DEPENDENCY_TREE_HASH: dep_hash,
+                JSONKeys.CALL_EDGES: [],
+                JSONKeys.INHERITANCE_EDGES: [],
+                JSONKeys.ROOT_CLASS: 'MyLoader',
+                JSONKeys.REGISTERED_AT: '2026-01-01T00:00:00+00:00',
             },
         ),
     )
 
-    entry = _make_entry('abc', str(cache_dir / 'output.tif'), dep_hash=dep_hash)
+    (write_entry(cache_root, 'abc', dep_hash=dep_hash) / 'output.tif').write_bytes(b'TIFF')
 
     with set_config(path_cache=cache_root, path_figures=tmp_path / 'figs', path_registry=registry):
+        reg = EntryRegistry()
         files, warnings = export_service.collect_export_files(
             ['abc'],
-            {'abc': entry},
+            reg,
             include_snapshots=True,
             path_allowed=_noop_allowed,
         )
@@ -131,7 +108,7 @@ def test_collect_skips_unknown_record_id(tmp_path: Path) -> None:
     with set_config(path_cache=tmp_path / 'data', path_figures=tmp_path / 'figs', path_registry=registry):
         files, warnings = export_service.collect_export_files(
             ['no_such_id'],
-            {},
+            EntryRegistry(),
             include_snapshots=False,
             path_allowed=_noop_allowed,
         )
@@ -143,13 +120,11 @@ def test_collect_default_path_allowed_is_permissive(tmp_path: Path) -> None:
     """Omitting path_allowed should not block collection (CLI has no HTTP boundary to guard)."""
     registry = tmp_path / '.source'
     cache_root = tmp_path / 'data'
-    cache_dir = cache_root / 'abc'
-    cache_dir.mkdir(parents=True)
-    (cache_dir / 'output.tif').write_bytes(b'TIFF')
-    entry = _make_entry('abc', str(cache_dir / 'output.tif'))
+    (write_entry(cache_root, 'abc') / 'output.tif').write_bytes(b'TIFF')
 
     with set_config(path_cache=cache_root, path_figures=tmp_path / 'figs', path_registry=registry):
-        files, warnings = export_service.collect_export_files(['abc'], {'abc': entry}, include_snapshots=False)
+        reg = EntryRegistry()
+        files, warnings = export_service.collect_export_files(['abc'], reg, include_snapshots=False)
 
     arcnames = [a for _, a in files]
     assert 'cache/abc/output.tif' in arcnames
@@ -160,16 +135,13 @@ def test_collect_disallowed_path_is_skipped_not_fatal(tmp_path: Path) -> None:
     """A path_allowed False for one entry should skip just that entry, not fail the whole export."""
     registry = tmp_path / '.source'
     cache_root = tmp_path / 'data'
-    cache_dir = cache_root / 'abc'
-    cache_dir.mkdir(parents=True)
-    (cache_dir / 'output.tif').write_bytes(b'TIFF')
-
-    entry = _make_entry('abc', str(cache_dir / 'output.tif'))
+    (write_entry(cache_root, 'abc') / 'output.tif').write_bytes(b'TIFF')
 
     with set_config(path_cache=cache_root, path_figures=tmp_path / 'figs', path_registry=registry):
+        reg = EntryRegistry()
         files, warnings = export_service.collect_export_files(
             ['abc'],
-            {'abc': entry},
+            reg,
             include_snapshots=False,
             path_allowed=_rejecting_allowed,
         )
@@ -183,13 +155,14 @@ def test_collect_unreadable_dir_is_skipped_not_fatal(tmp_path: Path) -> None:
     """A missing/unreadable cache dir should skip just that entry, not raise."""
     registry = tmp_path / '.source'
     cache_root = tmp_path / 'data'
-    missing_dir = cache_root / 'missing'
-    entry = _make_entry('abc', str(missing_dir / 'output.tif'))
+    entry_dir = write_entry(cache_root, 'abc')
 
     with set_config(path_cache=cache_root, path_figures=tmp_path / 'figs', path_registry=registry):
+        reg = EntryRegistry()
+        shutil.rmtree(entry_dir)
         files, warnings = export_service.collect_export_files(
             ['abc'],
-            {'abc': entry},
+            reg,
             include_snapshots=False,
             path_allowed=_noop_allowed,
         )

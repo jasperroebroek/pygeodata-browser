@@ -4,18 +4,11 @@ import json
 from pathlib import Path
 
 import pytest
-from pygeodata.catalog.filters import Filter, FilterTarget
-from pygeodata.catalog.types import (
-    ClassInfo,
-    EntryInfo,
-    FileRef,
-    LinkedEntry,
-    ParamRow,
-    ParamRowType,
-    SpecInfo,
-)
-from pygeodata.config import JSONKeys
-from pygeodata.spec import SpecKeys
+from pygeodata.catalog.types import LinkedEntry, ParamRow, ParamRowType
+from pygeodata.enums import JSONKeys, SpecKeys
+from pygeodata.views.filters import Filter, FilterTarget
+from pygeodata.views.types import ClassInfo, SpecInfo
+from pygeodata_browser.models import EntryInfo, FileRef
 from pygeodata_browser.payloads import (
     _build_class_cards,
     _build_detail_payload,
@@ -79,14 +72,12 @@ def make_entry(
         class_name=class_name,
         object_type=object_type,
         params_path='/cache/MyLoader/parameters.json',
-        spec_path=None,
         state_hash_path=None,
         execution_graph_path=None,
         state_hash=state_hash,
         instance_hash=None,
         params_hash=params_hash,
         spec_hash=spec_hash,
-        params={},
         spec=spec or make_spec(),
         rows=rows or [],
         warnings=warnings or [],
@@ -98,11 +89,11 @@ def make_entry(
     )
 
 
-def make_class_info(class_name='MyLoader', object_type='data', loaded=True, source_stale=False, deps_stale=False):
+def make_class_info(class_name='MyLoader', object_type='data', known=True, source_stale=False, deps_stale=False):
     return ClassInfo(
         class_name=class_name,
         object_type=object_type,
-        loaded=loaded,
+        known=known,
         call_dependency_names=[],
         inheritance_dependency_names=[],
         source_stale=source_stale,
@@ -757,7 +748,16 @@ def _write_tree(registry: Path, dep_hash: str, nodes: dict) -> None:
     d = registry / 'snapshots' / dep_hash
     d.mkdir(parents=True, exist_ok=True)
     (d / 'tree.json').write_text(
-        json.dumps({JSONKeys.NODES: nodes, JSONKeys.TREE: {}}),
+        json.dumps(
+            {
+                JSONKeys.DEPENDENCY_TREE_HASH: dep_hash,
+                JSONKeys.NODES: {name: {'object_type': 'Data', **node} for name, node in nodes.items()},
+                JSONKeys.CALL_EDGES: [],
+                JSONKeys.INHERITANCE_EDGES: [],
+                JSONKeys.ROOT_CLASS: next(iter(nodes), ''),
+                JSONKeys.REGISTERED_AT: '2026-01-01T00:00:00+00:00',
+            },
+        ),
         encoding='utf-8',
     )
 

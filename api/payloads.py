@@ -1,15 +1,43 @@
 import re
 from pathlib import Path
 
-from pygeodata.catalog.filters import Filter, entry_matches_filters, matching_rows, parse_filters
-from pygeodata.catalog.types import ClassInfo, EntryInfo, FileRef, LinkedEntry, ParamRowType
+from pygeodata.catalog.types import LinkedEntry, ParamRowType
+from pygeodata.enums import SpecKeys
 from pygeodata.formatting.json import format_json
 from pygeodata.registries.registry import SourceRegistry
 from pygeodata.registries.versioning import VersionRegistry
-from pygeodata.spec import SpecKeys
+from pygeodata.views.filters import Filter, LogicMode, combine, entry_matches_filter, matching_rows
+from pygeodata.views.types import ClassInfo
+from pygeodata_browser.models import EntryInfo, FileRef
 from pygeodata_browser.state import AppState
 
 _LIST_INDEX = re.compile(r'\[\d+\]$')
+
+# Targets about the browser's own entry fields, which pygeodata's filters do not know
+_ENTRY_FLAGS = {
+    'has_warnings': lambda entry: bool(entry.warnings),
+    'has_error': lambda entry: bool(entry.error),
+}
+
+
+def parse_filters(items: list[dict[str, str]] | None) -> list[Filter | str]:
+    return [item['target'] if item.get('target') in _ENTRY_FLAGS else Filter.from_dict(item) for item in items or []]
+
+
+def _entry_matches_filters(entry: EntryInfo, filters: list[Filter | str], logic_mode: str) -> bool:
+    if not filters:
+        return True
+    # EntryInfo carries the class_name, rows and spec.crs the entry filters read
+    matches = [
+        _ENTRY_FLAGS[flt](entry) if isinstance(flt, str) else entry_matches_filter(entry, entry.spec, flt)
+        for flt in filters
+    ]
+    return combine(matches, LogicMode(logic_mode))
+
+
+def _matching_rows(entry: EntryInfo, filters: list[Filter | str], logic_mode: str) -> list:
+    return matching_rows(entry, [flt for flt in filters if isinstance(flt, Filter)], LogicMode(logic_mode))
+
 
 # ---------------------------------------------------------------------------
 # Small serialisers — one responsibility each
@@ -142,7 +170,7 @@ def _entry_is_visible(
     selected_classes: list[str],
     kind_filter: str,
     spec_filters: dict,
-    filters: list[Filter],
+    filters: list[Filter | str],
     logic_mode: str,
     hide_stale: bool = False,
     snapshot_filter: list[str] | None = None,
@@ -157,7 +185,7 @@ def _entry_is_visible(
         return False
     if not _entry_matches_spec_filters(entry, spec_filters):
         return False
-    return entry_matches_filters(class_name, entry, filters, logic_mode)
+    return _entry_matches_filters(entry, filters, logic_mode)
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +198,7 @@ def _sidebar_counts(
     *,
     kind_filter: str,
     spec_filters: dict,
-    filters: list[Filter],
+    filters: list[Filter | str],
     logic_mode: str,
     hide_stale: bool = False,
     snapshot_filter: list[str] | None = None,
@@ -215,7 +243,7 @@ def _build_visible_groups(
     selected_classes: list[str],
     kind_filter: str,
     spec_filters: dict,
-    filters: list[Filter],
+    filters: list[Filter | str],
     logic_mode: str,
     hide_stale: bool = False,
     snapshot_filter: list[str] | None = None,
@@ -310,7 +338,7 @@ def _build_class_cards(
             {
                 'class_name': class_name,
                 'object_type': class_info.object_type,
-                'loaded': class_info.loaded,
+                'loaded': class_info.known,
                 'call_dependency_names': class_info.call_dependency_names,
                 'inheritance_dependency_names': class_info.inheritance_dependency_names,
                 'total_record_count': len(record_ids),
@@ -329,7 +357,7 @@ def _build_table_rows(
     visible_groups: list[tuple[str, list[EntryInfo]]],
     classes: dict[str, ClassInfo],
     selected_entry: str | None,
-    filters: list[Filter],
+    filters: list[Filter | str],
     logic_mode: str,
     row_display: str,
 ) -> list[dict]:
@@ -359,7 +387,7 @@ def _build_table_rows(
             if row_display == 'all':
                 detail_rows = entry.rows
             elif row_display == 'selected':
-                detail_rows = matching_rows(entry, filters, logic_mode)
+                detail_rows = _matching_rows(entry, filters, logic_mode)
             else:
                 detail_rows = []
 
@@ -380,7 +408,7 @@ def _class_detail_payload(class_info: ClassInfo) -> dict:
     return {
         'class_name': class_info.class_name,
         'object_type': class_info.object_type,
-        'loaded': class_info.loaded,
+        'loaded': class_info.known,
         'call_dependency_names': class_info.call_dependency_names,
         'inheritance_dependency_names': class_info.inheritance_dependency_names,
         'source_available': bool(class_info.class_source_path),
@@ -688,7 +716,7 @@ def build_classes_payload(
         'diagnostics': {**state.diagnostics, 'stale_hidden': stale_hidden},
         'counts': {
             'classes': len(state.classes),
-            'classes_loaded': sum(1 for c in state.classes.values() if c.loaded),
+            'classes_loaded': sum(1 for c in state.classes.values() if c.known),
             'entries': len(state.entries),
             'visible_classes': len(sidebar_counts),
             'visible_entries': sum(sidebar_counts.values()),

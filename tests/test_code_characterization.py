@@ -19,8 +19,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from pygeodata.config import JSONKeys, set_config
+from pygeodata.config import set_config
+from pygeodata.enums import JSONKeys
 from pygeodata.registries.versioning import VersionRegistry
+from pygeodata.views.types import SpecInfo
+from pygeodata_browser.models import EntryInfo
 from pygeodata_browser.state import AppContext, AppState
 from pygeodata_browser.web import app as flask_app
 
@@ -76,21 +79,17 @@ def _make_ready_ctx(version_registry: VersionRegistry | None = None):
 
 
 def _make_entry(record_id: str, dep_hash: str | None):
-    from pygeodata.catalog.types import EntryInfo, SpecInfo
-
     return EntryInfo(
         record_id=record_id,
         class_name='MyLoader',
         object_type='Data',
         params_path='',
-        spec_path=None,
         state_hash_path=None,
         execution_graph_path=None,
         state_hash=None,
         instance_hash=None,
         params_hash=None,
         spec_hash=None,
-        params={},
         spec=SpecInfo(),
         rows=[],
         dep_hash=dep_hash,
@@ -141,7 +140,11 @@ def sample_registry(tmp_path: Path):
                     'MyLoader': {JSONKeys.SOURCE_HASH: 'v1hash', JSONKeys.OBJECT_TYPE: 'Data', 'hash': 'v1hash'},
                     'MyDep': {JSONKeys.SOURCE_HASH: 'dep1hash', JSONKeys.OBJECT_TYPE: 'Data', 'hash': 'dep1hash'},
                 },
-                JSONKeys.TREE: {},
+                JSONKeys.DEPENDENCY_TREE_HASH: 'snapshot_pre',
+                JSONKeys.CALL_EDGES: [],
+                JSONKeys.INHERITANCE_EDGES: [],
+                JSONKeys.ROOT_CLASS: 'MyLoader',
+                JSONKeys.REGISTERED_AT: '2026-01-01T00:00:00+00:00',
             },
         ),
         encoding='utf-8',
@@ -156,7 +159,11 @@ def sample_registry(tmp_path: Path):
                     'MyLoader': {JSONKeys.SOURCE_HASH: 'v2hash', JSONKeys.OBJECT_TYPE: 'Data', 'hash': 'v2hash'},
                     'MyDep': {JSONKeys.SOURCE_HASH: 'dep1hash', JSONKeys.OBJECT_TYPE: 'Data', 'hash': 'dep1hash'},
                 },
-                JSONKeys.TREE: {},
+                JSONKeys.DEPENDENCY_TREE_HASH: 'snapshot_post',
+                JSONKeys.CALL_EDGES: [],
+                JSONKeys.INHERITANCE_EDGES: [],
+                JSONKeys.ROOT_CLASS: 'MyLoader',
+                JSONKeys.REGISTERED_AT: '2026-01-01T00:00:00+00:00',
             },
         ),
         encoding='utf-8',

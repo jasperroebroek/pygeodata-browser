@@ -3,23 +3,20 @@ import logging
 import sys
 import threading
 import traceback
-from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from pygeodata._version import FORMAT_VERSION
 from pygeodata.catalog import store
-from pygeodata.catalog.class_catalog import (
-    discover_loaded_classes,
-    merge_unloaded_classes,
-)
-from pygeodata.catalog.entry_catalog import _spec_info_cached, discover_entries
-from pygeodata.catalog.types import ClassInfo, EntryInfo
-from pygeodata.config import FORMAT_VERSION, get_config
+from pygeodata.config import get_config
 from pygeodata.registries.registry import EntryRegistry
 from pygeodata.registries.versioning import VersionRegistry
-from pygeodata.spec import SpecKeys
-from pygeodata.tracked_object import TrackedObject
-from pygeodata_browser.entry_store import EntryStore, spec_options_from_catalog
+from pygeodata.tracked_object import TrackedObject, live_tree_hash
+from pygeodata.views.classes import imported_classes, merge_unknown_classes
+from pygeodata.views.entries import spec_options
+from pygeodata.views.types import ClassInfo, spec_info
+from pygeodata_browser.entry_store import EntryStore
+from pygeodata_browser.models import EntryInfo
 
 _active_state: 'AppState | None' = None
 _catalog_sig: tuple[int, int] | None = None
@@ -298,50 +295,27 @@ def _reimport_modules(py_files: list[Path], root: Path):
 
 
 def build_state(progress: dict | None = None) -> AppState:
-    _spec_info_cached.cache_clear()
+    spec_info.cache_clear()
     version_registry = VersionRegistry()
     entry_registry = EntryRegistry()
     entries = EntryStore(entry_registry, version_registry)
     diagnostics = dict(entry_registry.diagnostics())
     diagnostics['created_entries'] = len(entries)
 
-    classes = merge_unloaded_classes(
-        discover_loaded_classes(),
+    classes = merge_unknown_classes(
+        imported_classes(),
         entry_registry,
-        entries=None,
+        live_tree_hash,
         version_registry=version_registry,
         src=version_registry.source_registry,
         trees=version_registry.tree_registry,
     )
 
-    # Unloaded classes keep the deps-stale dot: their newest versioned entry
-    # must match the live dependency tree (same semantics as the eager build).
-    for class_name in entry_registry.class_names:
-        info = classes.get(class_name)
-        if info is not None and not info.loaded:
-            info.deps_stale = entries.class_is_stale(class_name)
-
-    def _none_first(keys: Iterable[str]) -> list[str]:
-        return sorted(keys, key=lambda k: (k != 'None', k))
-
-    spec_options = spec_options_from_catalog()
-    if spec_options is None:
-        # No usable catalog — enrich eagerly so the UI keeps its spec pills.
-        eager, entry_registry, diagnostics = discover_entries(progress=progress, version_registry=version_registry)
-        entries = eager
-        bounds_by_key = {str(e.spec.bounds): (e.spec.bounds_display or 'None') for e in eager.values()}
-        resolution_keys = _none_first({e.spec.resolution_display or 'None' for e in eager.values()})
-        spec_options = {
-            SpecKeys.CRS: sorted({e.spec.crs for e in eager.values() if e.spec.crs}),
-            SpecKeys.RESOLUTION: [{'value': k, 'label': k} for k in resolution_keys],
-            SpecKeys.SHAPE: sorted({e.spec.shape for e in eager.values() if e.spec.shape}),
-            SpecKeys.BOUNDS: [{'value': k, 'label': bounds_by_key[k]} for k in _none_first(bounds_by_key)],
-        }
     state = AppState(
         classes=classes,
         entries=entries,
         diagnostics=diagnostics,
-        spec_options=spec_options,
+        spec_options=spec_options(entry_registry),
         entry_registry=entry_registry,
         version_registry=version_registry,
     )
