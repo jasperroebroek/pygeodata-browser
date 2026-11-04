@@ -5,7 +5,7 @@
   import { api, fetchFresh } from '../lib/api';
   import type { EntryDetail, FilePayload, SpecPayload } from '../lib/api';
   import { copyText, openFilePopup, openGraphPopup, openPath, revealPath } from '../lib/actions';
-  import { fileTone, isRasterFile } from '../lib/format';
+  import { fileTone, isRasterFile, offlineTitle } from '../lib/format';
   import { openModal } from '../lib/modal.svelte';
   import { navigateToCodeClass, showWhatChanged } from '../lib/nav.svelte';
   import {
@@ -38,6 +38,7 @@
   }
   let coShowAll = $state(false);
 
+  const readOnly = $derived(classesState.catalog?.read_only ?? false);
   const entryPinned = $derived(!!entry && isPinned(entry.record_id));
 
   const hasSpec = $derived(
@@ -114,9 +115,9 @@
   }
 </script>
 
-{#snippet fileActions(f: FilePayload)}
-  {#if !isRasterFile(f.path)}<button class="act-btn" onclick={() => openPath(f.path)}>Open</button>{/if}
-  <button class="act-btn" onclick={() => revealPath(f.path)}>Reveal</button>
+{#snippet fileActions(f: FilePayload, offline: boolean)}
+  {#if !isRasterFile(f.path)}<button class="act-btn" disabled={offline} onclick={() => openPath(f.path)}>Open</button>{/if}
+  <button class="act-btn" disabled={offline} onclick={() => revealPath(f.path)}>Reveal</button>
   <button class="act-btn" onclick={() => copyText(f.path)}>Copy path</button>
 {/snippet}
 
@@ -124,11 +125,11 @@
   <span class="file-type file-type--{fileTone(f.kind)}">{f.kind}</span>
 {/snippet}
 
-{#snippet fileRow(f: FilePayload)}
+{#snippet fileRow(f: FilePayload, offline: boolean)}
   <div class="entry-file-row" style="margin-top:4px">
     {@render fileType(f)}
     <span class="entry-file-name">{f.label}</span>
-    {@render fileActions(f)}
+    {@render fileActions(f, offline)}
   </div>
 {/snippet}
 
@@ -280,6 +281,8 @@
               class="badge badge--sm badge-warn"
               title="Dependencies changed since this entry was last computed — results may no longer match current code"
               >stale</span
+            >{/if}{#if e.offline_root}<span class="badge badge--sm badge-offline" title={offlineTitle(e.offline_root)}
+              >offline</span
             >{/if}
         </div>
         <div class="dcard-hd-actions">
@@ -289,11 +292,13 @@
           {/if}
           {#if (hasVisibleParams && e.params_path) || e.state_hash_path || e.execution_graph_path}
             {#if hasVisibleParams && e.params_path}
-              <button class="act-btn" onclick={() => openFilePopup(e.params_path)}>Params</button>
+              <button class="act-btn" disabled={!!e.offline_root} onclick={() => openFilePopup(e.params_path)}>Params</button>
             {/if}
-            {#if e.state_hash_path}<button class="act-btn" onclick={() => openFilePopup(e.state_hash_path)}>Hash</button>{/if}
+            {#if e.state_hash_path}
+              <button class="act-btn" disabled={!!e.offline_root} onclick={() => openFilePopup(e.state_hash_path)}>Hash</button>
+            {/if}
             {#if e.execution_graph_path}
-              <button class="act-btn" onclick={() => openFilePopup(e.execution_graph_path)}>Graph</button>
+              <button class="act-btn" disabled={!!e.offline_root} onclick={() => openFilePopup(e.execution_graph_path)}>Graph</button>
             {/if}
             {@render hdSep()}
           {/if}
@@ -315,12 +320,27 @@
             <Pin size={14} fill={entryPinned ? 'currentColor' : 'none'} />
           </button>
           {@render hdSep()}
-          <button class="act-btn act-btn--danger" title="Delete this cache entry from disk" onclick={() => deleteEntry(e)}>
+          <button
+            class="act-btn act-btn--danger"
+            disabled={readOnly || !!e.offline_root}
+            title={readOnly
+              ? 'Read-only (mirror mode): the browser never writes into the project'
+              : e.offline_root
+                ? 'Unavailable: its cache root is offline'
+                : 'Delete this cache entry from disk'}
+            onclick={() => deleteEntry(e)}
+          >
             Delete
           </button>
         </div>
       </div>
       <div class="dcard-body dcard-body--entry" class:has-spec={hasSpec}>
+        {#if e.offline_root}
+          <div class="offline-note">
+            Cache root {e.offline_root} is unavailable (missing or empty): this entry is shown from the catalog and its
+            files can't be checked.
+          </div>
+        {/if}
         {#if hasSpec}
           <div class="spec-kv-table">
             {#if e.spec.crs}
@@ -369,13 +389,13 @@
           <div class="entry-file-row">
             {@render fileType(e.primary_file)}
             <span class="entry-file-name" class:entry-file-name--primary={e.sidecar_files.length > 0}>{e.primary_file.label}</span>
-            {@render fileActions(e.primary_file)}
+            {@render fileActions(e.primary_file, !!e.offline_root)}
           </div>
           {#each e.sidecar_files as f (f.path)}
             <div class="entry-file-row entry-file-row--sidecar">
               {@render fileType(f)}
               <span class="entry-file-name">{f.label}</span>
-              {@render fileActions(f)}
+              {@render fileActions(f, !!e.offline_root)}
             </div>
           {/each}
         {/if}
@@ -403,7 +423,7 @@
                 {@render entryLink(o.record_id, o.class_name)}
                 <span class="link-hash" title={o.state_hash ?? ''}>{o.state_hash ? o.state_hash.slice(0, 6) : '—'}</span>
               </div>
-              {#if o.primary_file}{@render fileRow(o.primary_file)}{/if}
+              {#if o.primary_file}{@render fileRow(o.primary_file, o.offline)}{/if}
               {#if params.length}
                 <div class="link-params co-params">
                   {#each params as r, i (i)}
@@ -432,7 +452,7 @@
                   {#each specParts(s.spec, 'raw') as p, i (i)}<span class="tbl-spec-pill">{p}</span>{/each}
                 </span>
               </div>
-              {#if s.primary_file}{@render fileRow(s.primary_file)}{/if}
+              {#if s.primary_file}{@render fileRow(s.primary_file, s.offline)}{/if}
             </div>
           {/each}
         </div>

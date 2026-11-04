@@ -1,7 +1,7 @@
 <script lang="ts">
   import Download from '@lucide/svelte/icons/download';
   import type { TableRow } from '../lib/api';
-  import { softBreak } from '../lib/format';
+  import { offlineTitle, softBreak } from '../lib/format';
   import PinToggle from './PinToggle.svelte';
   import TypeBadge from './TypeBadge.svelte';
 
@@ -71,6 +71,9 @@
               {:else if r.dep_hash_stale}
                 <span class="badge badge--sm badge-warn" title="Dependencies changed — entry may be outdated">stale</span>
               {/if}
+              {#if r.offline_root}
+                <span class="badge badge--sm badge-offline" title={offlineTitle(r.offline_root)}>offline</span>
+              {/if}
             </span>
             <span class="cell-entry-spec">
               {#each specParts(r) as part, j (j)}<span class="tbl-spec-pill">{part}</span>{/each}
@@ -79,8 +82,9 @@
               <PinToggle entry={r} />
               <button
                 class="icon-btn icon-btn--xs entry-dl"
-                title="Download this entry"
+                title={r.offline_root ? 'Unavailable: its cache root is offline' : 'Download this entry'}
                 aria-label="Download this entry"
+                disabled={!!r.offline_root}
                 onclick={(e) => {
                   e.stopPropagation();
                   onDownload(r.record_id);

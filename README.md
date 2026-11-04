@@ -42,6 +42,49 @@ seconds; the last two are set in import mode while code changed since the last i
 > **runs** (for example a `run.py` pipeline), on every import, automatically every few
 > minutes while you edit. Guard such scripts before using import mode.
 
+## Mirror mode
+
+A project that runs on a server and is mirrored to a laptop (Nextcloud, rsync, ...) is
+browsed on the laptop without ever writing into the mirror. The browser is **read-only**
+("mirror mode") when the catalog's `writer.root` differs from the local project root (the
+rule of `pygeodata.catalog.store.open_catalog`) or when `catalog_enabled` is False;
+`pygeodata browse --read-only` / `--writable` override the detection. The mode and why
+are listed in the Activity panel (registry diagnostics), together with the writer's root,
+host, versions and time, the `catalog_id`, the local paths below, and the count of entries
+with absolute dir paths.
+
+In mirror mode:
+
+- the catalog is opened with `EntryRegistry(read_only=True)`: no save, prune or refresh,
+  Reload rebuilds from the catalog file only;
+- pins are kept in `user_data_dir("pygeodata-browser")/<catalog_id>/pins.json` (pygeodata's
+  `Pin` type); the server's `.catalog.pins.json` is not shown. Writable mode keeps using
+  `.catalog.pins.json`;
+- delete entry, clean cache and clean registry are disabled in the UI and answer `409`;
+- with `--import-all` the analysis subprocess runs with `PYTHONDONTWRITEBYTECODE=1`
+  (unless `--writable`), so no `__pycache__` appears in the mirror. Project code that
+  writes on import is still the project's own business.
+
+Thumbnails are cached in `user_cache_dir("pygeodata-browser")/<catalog_id>/thumbs/` in both
+modes, never in the project. A project without a catalog file has no stable id, so its local
+state is keyed `root-<hash of the resolved project root>` instead.
+
+A catalog written by an older (or newer) pygeodata cannot be rebuilt on a mirror: the UI shows
+*The catalog was written by an older pygeodata; run `pygeodata catalog build` where it is
+written (<root>)* rather than a traceback.
+
+### Unavailable cache roots
+
+A cache root that is missing or empty (an unsynced mirror, an unmounted share) keeps its
+entries in the catalog (`CatalogDiff.unavailable_roots`), in both modes. The UI says so: a
+banner above the entry list, a grey `offline` badge on the affected rows with download and
+open disabled, the same badge and an explanation in the detail pane, and an
+`Online` / `Offline (n)` filter beside the kind filter. Rows and details carry
+`offline_root`, computed once per state build; `/api/classes` and `/api/class-entries` take
+`offline_filter=all|online|offline`. `/api/classes` also returns the `catalog` info shown in
+the Activity panel, including since when (first seen by this server process) each root is
+unavailable.
+
 ## Install
 
 ```

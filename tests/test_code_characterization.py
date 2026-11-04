@@ -19,7 +19,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from conftest import make_analysis
+from conftest import make_analysis, make_catalog_context
 from pygeodata.config import set_config
 from pygeodata.enums import JSONKeys
 from pygeodata.registries.versioning import VersionRegistry
@@ -75,6 +75,7 @@ def _make_ready_ctx(version_registry: VersionRegistry | None = None):
         entry_registry=_FakeEntryRegistry(),
         version_registry=version_registry if version_registry is not None else VersionRegistry(),
         analysis=make_analysis(),
+        catalog=make_catalog_context(Path('.')),
     )
     ctx.ready.set()
     return ctx

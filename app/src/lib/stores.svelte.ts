@@ -3,6 +3,7 @@ import { toast } from './toast.svelte';
 import type {
   BootstrapRow,
   ClassCard,
+  CatalogInfo,
   ClassesPayload,
   DetailPayload,
   EntriesPagePayload,
@@ -14,6 +15,7 @@ import type {
 
 export type View = 'entries' | 'code' | 'export';
 export type KindFilter = 'all' | 'data' | 'table' | 'figure';
+export type OfflineFilter = 'all' | 'online' | 'offline';
 export type LogicMode = 'AND' | 'OR' | 'NOT';
 export type EntriesMode = 'compact' | 'detailed';
 export type ParamDisplay = 'selected' | 'all';
@@ -100,6 +102,8 @@ export const filterState = $state({
   specFilters: {} as Record<string, string[]>,
   versionFilter: null as string | null,
   hideStale: stored('hide_stale') === 'true',
+  /** Entries of unavailable cache roots: all, only the online ones, or only the offline ones. */
+  offlineFilter: 'all' as OfflineFilter,
   /** Show only pinned entries (across all classes when none is selected). */
   pinnedOnly: false,
 });
@@ -110,6 +114,7 @@ export const classesState = $state({
   versionOptions: [] as VersionOption[],
   counts: null as ClassesPayload['counts'] | null,
   diagnostics: {} as Record<string, number>,
+  catalog: null as CatalogInfo | null,
 });
 
 class TableState {
@@ -273,6 +278,7 @@ function filterParams(): Record<string, string> {
     logic_mode: filterState.logicMode,
   };
   if (filterState.hideStale) p.hide_stale = '1';
+  if (filterState.offlineFilter !== 'all') p.offline_filter = filterState.offlineFilter;
   if (filterState.pinnedOnly) p.pinned_only = '1';
   if (filterState.versionFilter) p.version_filter = filterState.versionFilter;
   if (Object.keys(filterState.specFilters).length > 0) p.spec_filters = JSON.stringify(filterState.specFilters);
@@ -375,7 +381,13 @@ export async function refreshClasses() {
   classesState.specOptions = data.spec_options;
   classesState.versionOptions = data.version_options;
   classesState.counts = data.counts;
-  classesState.diagnostics = data.diagnostics as Record<string, number>;
+  classesState.diagnostics = data.diagnostics;
+  classesState.catalog = data.catalog;
+  // Nothing offline any more (the root came back): the filter has no control left to reset it.
+  if (filterState.offlineFilter !== 'all' && !data.diagnostics.offline_entries) {
+    filterState.offlineFilter = 'all';
+    void loadEntries(0, true);
+  }
   if (filterState.versionFilter && !data.version_options.some((o) => o.version_id === filterState.versionFilter)) {
     filterState.versionFilter = null;
   }
@@ -587,6 +599,11 @@ export async function toggleSpecFilter(dimension: string, value: string) {
 
 export async function setVersionFilter(versionId: string | null) {
   filterState.versionFilter = versionId;
+  await onFilterChange();
+}
+
+export async function setOfflineFilter(filter: OfflineFilter) {
+  filterState.offlineFilter = filter;
   await onFilterChange();
 }
 

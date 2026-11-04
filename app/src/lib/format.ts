@@ -10,6 +10,9 @@ export function triggerDownload(url: string, name?: string) {
   a.click();
 }
 
+export const offlineTitle = (root: string) =>
+  `Cache root ${root} is unavailable (missing or empty): this entry is shown from the catalog and its files can't be checked`;
+
 export const singleEntryUrl = (recordId: string) => `/api/export/single/${encodeURIComponent(recordId)}`;
 
 const RASTER_EXTS = new Set(['.tif', '.tiff', '.nc', '.vrt', '.npy', '.zarr']);

@@ -79,7 +79,7 @@
       key: 'diag',
       label: 'Registry diagnostics',
       icon: Activity,
-      run: () => openModal('Registry diagnostics', { kind: 'diagnostics' }, 'sm'),
+      run: () => openModal('Registry diagnostics', { kind: 'diagnostics' }, 'md'),
     },
   ];
 

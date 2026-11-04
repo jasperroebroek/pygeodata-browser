@@ -391,3 +391,4 @@ tr.row-entry:hover .cell-entry-hd-inner:not(:has(.entry-pin.active)) .cell-entry
 
 .pill-flag--warn { color: var(--warn);   background: var(--warn-bg);   }
 .pill-flag--err  { color: var(--danger); background: var(--danger-bg); }
+.pill-flag--off  { color: var(--faint);  background: var(--s2); }

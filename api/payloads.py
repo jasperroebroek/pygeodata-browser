@@ -160,9 +160,12 @@ def _entry_is_visible(
     filters: list[Filter],
     logic_mode: str,
     hide_stale: bool = False,
+    offline_filter: str = 'all',
     snapshot_filter: list[str] | None = None,
 ) -> bool:
     if hide_stale and (entry.dep_hash_stale or entry.format_version_stale):
+        return False
+    if (offline_filter == 'online' and entry.offline) or (offline_filter == 'offline' and not entry.offline):
         return False
     if snapshot_filter and entry.dep_hash not in snapshot_filter:  # snapshot_filter is a resolved set of dep_hashes
         return False
@@ -188,6 +191,7 @@ def _sidebar_counts(
     filters: list[Filter],
     logic_mode: str,
     hide_stale: bool = False,
+    offline_filter: str = 'all',
     snapshot_filter: list[str] | None = None,
 ) -> dict[str, int]:
     store = getattr(state.entries, 'count_by_class', None)
@@ -198,6 +202,7 @@ def _sidebar_counts(
             snapshot_dep_hashes=set(snapshot_filter) if snapshot_filter else None,
             hide_stale=hide_stale,
             object_type_by_class={name: ci.object_type for name, ci in state.classes.items()},
+            offline_filter=offline_filter,
         )
     counts: dict[str, int] = {}
     for class_name, class_info in state.classes.items():
@@ -216,6 +221,7 @@ def _sidebar_counts(
                 filters=filters,
                 logic_mode=logic_mode,
                 hide_stale=hide_stale,
+                offline_filter=offline_filter,
                 snapshot_filter=snapshot_filter,
             )
         )
@@ -233,6 +239,7 @@ def _build_visible_groups(
     filters: list[Filter],
     logic_mode: str,
     hide_stale: bool = False,
+    offline_filter: str = 'all',
     snapshot_filter: list[str] | None = None,
 ) -> list[tuple[str, list[EntryInfo]]]:
     visible_groups: list[tuple[str, list[EntryInfo]]] = []
@@ -265,6 +272,7 @@ def _build_visible_groups(
                 filters=filters,
                 logic_mode=logic_mode,
                 hide_stale=hide_stale,
+                offline_filter=offline_filter,
                 snapshot_filter=snapshot_filter,
             )
         ]
@@ -364,6 +372,7 @@ def _build_table_rows(
                     'source_stale': ci.source_stale if ci else False,
                     'dep_hash_stale': entry.dep_hash_stale,
                     'format_version_stale': entry.format_version_stale,
+                    'offline_root': entry.offline_root,
                     'dep_hash': entry.dep_hash,
                 },
             )
@@ -417,6 +426,7 @@ def _co_output_payload(entry: EntryInfo, main_entry: EntryInfo) -> dict:
         'class_name': entry.class_name,
         'object_type': entry.object_type,
         'state_hash': entry.state_hash,
+        'offline': entry.offline,
         'primary_file': _file_payload(entry.primary_file) if entry.primary_file else None,
         'rows': [_row_payload(r) for r in entry.rows],
         'diff_rows': _co_output_diff_rows(entry, main_entry),
@@ -428,6 +438,7 @@ def _same_instance_run_payload(sibling: EntryInfo) -> dict:
         'record_id': sibling.record_id,
         'class_name': sibling.class_name,
         'state_hash': sibling.state_hash,
+        'offline': sibling.offline,
         'primary_file': _file_payload(sibling.primary_file) if sibling.primary_file else None,
         'spec': _spec_payload(sibling.spec),
     }
@@ -442,6 +453,7 @@ def _entry_detail_payload(entry: EntryInfo, same_instance_runs: list[EntryInfo] 
         'object_type': entry.object_type,
         'dep_hash_stale': entry.dep_hash_stale,
         'format_version_stale': entry.format_version_stale,
+        'offline_root': entry.offline_root,
         'dep_hash': entry.dep_hash,
         'params_path': entry.params_path,
         'state_hash_path': entry.state_hash_path,
@@ -450,9 +462,11 @@ def _entry_detail_payload(entry: EntryInfo, same_instance_runs: list[EntryInfo] 
         'primary_file': _file_payload(entry.primary_file) if entry.primary_file else None,
         'sidecar_files': [_file_payload(f) for f in entry.sidecar_files],
         'figure_preview': entry.primary_file.path
-        if entry.primary_file and entry.primary_file.kind == 'image'
+        if entry.primary_file and entry.primary_file.kind == 'image' and not entry.offline
         else None,
-        'table_preview': entry.primary_file.path if entry.primary_file and entry.primary_file.kind == 'table' else None,
+        'table_preview': entry.primary_file.path
+        if entry.primary_file and entry.primary_file.kind == 'table' and not entry.offline
+        else None,
         'co_outputs': [_co_output_payload(e, entry) for e in entry.co_outputs],
         'same_instance_runs': [_same_instance_run_payload(s) for s in (same_instance_runs or [])],
         'rows': [_row_payload(r) for r in entry.rows],
@@ -657,6 +671,7 @@ def build_classes_payload(
     filters: list[dict] | None = None,
     logic_mode: str = 'AND',
     hide_stale: bool = False,
+    offline_filter: str = 'all',
     version_filter: str | None = None,
 ) -> dict:
     vreg = state.version_registry
@@ -672,6 +687,7 @@ def build_classes_payload(
         filters=parsed_filters,
         logic_mode=logic_mode,
         hide_stale=hide_stale,
+        offline_filter=offline_filter,
         snapshot_filter=dep_hash_set,
     )
 
@@ -697,6 +713,7 @@ def build_classes_payload(
         'spec_options': state.spec_options,
         'version_options': version_groups_payload(vreg),
         'diagnostics': {**state.diagnostics, 'stale_hidden': stale_hidden},
+        'catalog': state.catalog.payload(),
         'counts': {
             'classes': len(state.classes),
             'classes_loaded': sum(1 for c in state.classes.values() if c.known),
@@ -716,6 +733,7 @@ def build_entries_page_payload(
     filters: list[dict] | None = None,
     logic_mode: str = 'AND',
     hide_stale: bool = False,
+    offline_filter: str = 'all',
     version_filter: str | None = None,
     offset: int = 0,
     limit: int = 50,
@@ -751,6 +769,7 @@ def build_entries_page_payload(
                 snapshot_dep_hashes=dep_hash_set,
                 hide_stale=hide_stale,
                 object_type_by_class={name: ci.object_type for name, ci in state.classes.items()},
+                offline_filter=offline_filter,
             )
             if ids is not None:
                 return {'ids': ids, 'total': len(ids)}
@@ -763,6 +782,7 @@ def build_entries_page_payload(
         filters=parsed_filters,
         logic_mode=logic_mode,
         hide_stale=hide_stale,
+        offline_filter=offline_filter,
         snapshot_filter=dep_hash_set,
     )
     entries = [

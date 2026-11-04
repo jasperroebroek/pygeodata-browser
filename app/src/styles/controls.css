@@ -260,6 +260,16 @@
   background: var(--accent-bg);
 }
 
+.act-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.act-btn:disabled:hover {
+  color: var(--muted);
+  background: none;
+}
+
 .act-btn--ghost {
   opacity: 0.6;
 }
@@ -309,6 +319,7 @@
 .badge-ok       { border-color: var(--border);     color: var(--faint);  background: var(--s2); }
 .badge-warn     { border-color: var(--warn-border); color: var(--warn);   background: var(--warn-bg); }
 .badge-danger   { border-color: var(--danger-border); color: var(--danger); background: var(--danger-bg); }
+.badge-offline  { border-color: var(--border);     color: var(--faint);  background: var(--s2); border-style: dashed; }
 .badge-cache    { border-color: var(--border);      color: var(--muted);  background: var(--s2); }
 .badge-deps     { border-color: var(--deps-border); color: var(--deps); background: var(--deps-bg); }
 
@@ -527,12 +538,19 @@
 }
 
 
+.offline-note {
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: var(--faint);
+}
+
 /* ------------------------------------------------------------
    Diagnostics modal
    ------------------------------------------------------------ */
 
 .diag-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 13px;
 }
@@ -565,6 +583,14 @@
   font-variant-numeric: tabular-nums;
   font-weight: 500;
   vertical-align: middle;
+}
+
+.diag-table .diag-val--text {
+  text-align: left;
+  font-weight: 400;
+  white-space: normal;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
 }
 
 /* Warning highlight — shown when a count is > 0 */

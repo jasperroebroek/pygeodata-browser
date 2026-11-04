@@ -47,11 +47,16 @@ class EntryInfo:
     record_id: str = ''
     dep_hash: str | None = None
     dep_hash_stale: bool = False
+    offline_root: str | None = None
     co_outputs: list[EntryInfo] = field(default_factory=list)
 
     @property
     def format_version_stale(self) -> bool:
         return self.format_version != FORMAT_VERSION
+
+    @property
+    def offline(self) -> bool:
+        return self.offline_root is not None
 
     @property
     def entry_dir(self) -> Path:

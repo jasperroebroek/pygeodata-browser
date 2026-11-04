@@ -7,11 +7,12 @@
     tableState,
     toggleSelectedEntry,
   } from '../lib/stores.svelte';
-  import { singleEntryUrl, triggerDownload } from '../lib/format';
+  import { offlineTitle, singleEntryUrl, triggerDownload } from '../lib/format';
   import Download from '@lucide/svelte/icons/download';
   import type { TableRow } from '../lib/api';
   import EntryRows from './EntryRows.svelte';
   import KindIcon from './KindIcon.svelte';
+  import OfflineBanner from './OfflineBanner.svelte';
   import PinToggle from './PinToggle.svelte';
 
   let scrollEl: HTMLElement | undefined = $state();
@@ -78,6 +79,7 @@
 </script>
 
 <main class="main-pane">
+  <OfflineBanner />
   {#if layout.entriesMode === 'compact'}
     <div class="entry-pill-list" bind:this={scrollEl} onscroll={maybeLoadMore}>
       {#if headers.length === 0}
@@ -118,6 +120,9 @@
             {:else if r.dep_hash_stale}
               <span class="pill-flag pill-flag--warn" title="Dependencies changed — entry may be outdated">stale</span>
             {/if}
+            {#if r.offline_root}
+              <span class="pill-flag pill-flag--off" title={offlineTitle(r.offline_root)}>offline</span>
+            {/if}
             <span class="entry-pill-spec">
               {#each specParts(r) as part, j (j)}<span class="tbl-spec-pill">{part}</span>{/each}
             </span>
@@ -125,8 +130,9 @@
               <PinToggle entry={r} />
               <button
                 class="icon-btn icon-btn--xs entry-dl"
-                title="Download this entry"
+                title={r.offline_root ? 'Unavailable: its cache root is offline' : 'Download this entry'}
                 aria-label="Download this entry"
+                disabled={!!r.offline_root}
                 onclick={(e) => {
                   e.stopPropagation();
                   download(r.record_id);

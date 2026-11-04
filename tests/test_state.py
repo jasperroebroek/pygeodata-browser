@@ -66,7 +66,7 @@ class CountingAnalyser:
     def __init__(self) -> None:
         self.calls = 0
 
-    def __call__(self, root: Path, *, timeout: float):
+    def __call__(self, root: Path, *, timeout: float, env: dict[str, str] | None = None):
         self.calls += 1
         return analyse_project(root)
 

@@ -35,6 +35,8 @@ export interface TableRow {
   source_stale?: boolean;
   dep_hash_stale?: boolean;
   format_version_stale?: boolean;
+  /** The unavailable cache root this entry belongs to; its files can't be checked. */
+  offline_root?: string | null;
   dep_hash?: string;
   group?: string;
   parameter?: string;
@@ -80,6 +82,7 @@ export interface CoOutput {
   class_name: string;
   object_type?: string;
   state_hash: string | null;
+  offline: boolean;
   primary_file: FilePayload | null;
   rows: ParamRow[];
   diff_rows: ParamRow[];
@@ -89,6 +92,7 @@ export interface SameInstanceRun {
   record_id: string;
   class_name: string;
   state_hash: string | null;
+  offline: boolean;
   primary_file: FilePayload | null;
   spec: SpecPayload;
 }
@@ -111,6 +115,7 @@ export interface EntryDetail {
   object_type: ObjectType;
   dep_hash_stale: boolean;
   format_version_stale: boolean;
+  offline_root: string | null;
   dep_hash: string;
   params_path: string;
   state_hash_path: string;
@@ -169,11 +174,32 @@ export interface StatusPayload {
   fast: boolean;
 }
 
+export interface UnavailableRoot {
+  path: string;
+  name: string;
+  entries: number;
+  /** epoch seconds: when this server process first saw the root unavailable */
+  since: number;
+}
+
+export interface CatalogInfo {
+  mode: 'mirror' | 'writable';
+  read_only: boolean;
+  reason: string;
+  catalog_id: string;
+  writer: { root: string; host: string; written_at: number; pygeodata: string; python: string };
+  pins_path: string;
+  thumbs_path: string;
+  absolute_dir_entries: number;
+  unavailable_roots: UnavailableRoot[];
+}
+
 export interface ClassesPayload {
   class_cards: ClassCard[];
   spec_options: Record<string, (string | { value: string; label: string })[]>;
   version_options: VersionOption[];
-  diagnostics: Record<string, unknown>;
+  diagnostics: Record<string, number>;
+  catalog: CatalogInfo;
   counts: {
     classes: number;
     classes_loaded: number;

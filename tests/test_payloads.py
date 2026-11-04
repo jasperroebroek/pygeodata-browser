@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import make_analysis
+from conftest import make_analysis, make_catalog_context
 from pygeodata.catalog.types import LinkedEntry, ParamRow, ParamRowType
 from pygeodata.enums import JSONKeys, SpecKeys
 from pygeodata.views.filters import Filter, FilterTarget
@@ -139,6 +139,7 @@ def make_state(entries=None, classes=None, groups=None):
         entry_registry=_FakeEntryRegistry(groups),
         version_registry=_FakeVersionRegistry(),
         analysis=make_analysis(),
+        catalog=make_catalog_context(Path('.')),
     )
 
 

@@ -3,10 +3,12 @@ from pathlib import Path
 import pytest
 from pygeodata._version import FORMAT_VERSION
 from pygeodata.analysis import ClassRecord, ProjectAnalysis
+from pygeodata.catalog.types import CatalogHeader, CatalogWriter
 from pygeodata.config import set_config
 from pygeodata.dependencies import ClassFacts
 from pygeodata.paths import CachePathConstructor
 from pygeodata.records import EntryRecord
+from pygeodata_browser.catalog_context import CatalogContext
 
 
 @pytest.fixture(autouse=True)
@@ -66,3 +68,23 @@ def make_analysis(mode: str = 'static', **source_hashes: str) -> ProjectAnalysis
         for name, source_hash in source_hashes.items()
     }
     return ProjectAnalysis(mode=mode, root='.', classes=classes)
+
+
+def make_catalog_context(tmp_path: Path, read_only: bool = False) -> CatalogContext:
+    header = CatalogHeader(
+        catalog_version=1,
+        schema_fingerprint='f',
+        catalog_id='cid',
+        writer=CatalogWriter(root=str(tmp_path), host='h', pygeodata='0', python='3', written_at=0.0),
+        roots={},
+    )
+    return CatalogContext(
+        read_only=read_only,
+        reason='test',
+        header=header,
+        key='cid',
+        pins_path=tmp_path / 'pins.json',
+        thumbs_dir=tmp_path / 'thumbs',
+        absolute_dir_entries=0,
+        unavailable_roots=[],
+    )

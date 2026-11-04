@@ -1,8 +1,11 @@
 <script lang="ts">
   import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
   import { api } from '../lib/api';
-  import { startReload, ui } from '../lib/stores.svelte';
+  import { classesState, startReload, ui } from '../lib/stores.svelte';
   import { openModal } from '../lib/modal.svelte';
+
+  const readOnly = $derived(classesState.catalog?.read_only ?? false);
+  const readOnlyTitle = 'Read-only (mirror mode): the browser never writes into the project';
 
   let open = $state(false);
   let wrapEl: HTMLElement | undefined = $state();
@@ -41,7 +44,8 @@
       <button
         class="topbar-menu-item"
         role="menuitem"
-        disabled={!ui.hasLiveClasses}
+        disabled={!ui.hasLiveClasses || readOnly}
+        title={readOnly ? readOnlyTitle : undefined}
         onclick={() => run(() => openModal('Clean Cache', { kind: 'clean', target: 'cache' }, 'md'))}
       >
         Clean cache…
@@ -49,7 +53,8 @@
       <button
         class="topbar-menu-item"
         role="menuitem"
-        disabled={!ui.hasLiveClasses}
+        disabled={!ui.hasLiveClasses || readOnly}
+        title={readOnly ? readOnlyTitle : undefined}
         onclick={() => run(() => openModal('Clean Source Registry', { kind: 'clean', target: 'source' }, 'md'))}
       >
         Clean registry…

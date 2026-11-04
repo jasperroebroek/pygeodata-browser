@@ -1,4 +1,5 @@
 import logging
+import os
 import threading
 import time
 import traceback
@@ -8,6 +9,7 @@ from pathlib import Path
 from typing import Literal
 
 from pygeodata.analysis import AnalysisError, ProjectAnalysis, analyse_in_subprocess
+from pygeodata.catalog.types import CatalogNewerError, CatalogOutdatedError
 from pygeodata.config import get_config
 from pygeodata.project import iter_project_files
 from pygeodata.registries.registry import EntryRegistry
@@ -16,6 +18,7 @@ from pygeodata.static import analyse_project
 from pygeodata.views.classes import merge_unknown_classes, source_classes
 from pygeodata.views.entries import spec_options
 from pygeodata.views.types import ClassInfo, spec_info
+from pygeodata_browser.catalog_context import CatalogContext, offline_roots
 from pygeodata_browser.entry_store import EntryStore
 from pygeodata_browser.models import EntryInfo
 
@@ -25,6 +28,13 @@ POLL_INTERVAL = 10.0
 IMPORT_TIMEOUT = 600.0
 
 Mode = Literal['static', 'import']
+
+
+class CatalogError(Exception):
+    """The catalog cannot be read here; the message says what to do about it."""
+
+
+KNOWN_ERRORS = (AnalysisError, CatalogError)
 
 
 def catalog_signature() -> tuple[int, int] | None:
@@ -62,6 +72,7 @@ class AppState:
     entry_registry: EntryRegistry
     version_registry: VersionRegistry
     analysis: ProjectAnalysis
+    catalog: CatalogContext
 
     def get_state_hashes(self, class_name: str) -> list[str]:
         return self.entry_registry.get_state_hashes(class_name)
@@ -84,8 +95,10 @@ class AppContext:
         mode: Mode = 'static',
         root: Path | None = None,
         clock: Callable[[], float] = time.time,
+        read_only: bool | None = None,
     ) -> None:
         self.mode = mode
+        self.read_only = read_only
         self.root = root if root is not None else Path.cwd()
         self._clock = clock
         self.state: AppState | None = None
@@ -119,9 +132,9 @@ class AppContext:
             try:
                 self._code_sig = code_signature(self.root)
                 self.code_changed_since = None
-                state = build_state(self._analyse())
+                state = build_state(self._analyse(), self.read_only, self._unavailable_since())
             except Exception as exc:
-                self.load_error = str(exc) if isinstance(exc, AnalysisError) else traceback.format_exc()
+                self.load_error = str(exc) if isinstance(exc, KNOWN_ERRORS) else traceback.format_exc()
                 _log.warning('reload failed; keeping the previous state', exc_info=True)
             else:
                 self.state = state
@@ -134,8 +147,16 @@ class AppContext:
 
     def _analyse(self) -> ProjectAnalysis:
         if self.mode == 'import':
-            return analyse_in_subprocess(self.root, timeout=IMPORT_TIMEOUT)
+            if self.read_only is False:
+                return analyse_in_subprocess(self.root, timeout=IMPORT_TIMEOUT)
+            # the mode is only known once the catalog is open: don't risk __pycache__ directories in a mirror
+            env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1'}
+            return analyse_in_subprocess(self.root, timeout=IMPORT_TIMEOUT, env=env)
         return analyse_project(self.root)
+
+    def _unavailable_since(self) -> dict[str, float]:
+        state = self.state
+        return {r.path: r.since for r in state.catalog.unavailable_roots} if state is not None else {}
 
     def _busy(self) -> bool:
         return self.is_loading() or self._lock.locked()
@@ -203,13 +224,30 @@ def _prewarm_async(ctx: AppContext, state: AppState) -> None:
     threading.Thread(target=_warm, daemon=True).start()
 
 
-def build_state(analysis: ProjectAnalysis) -> AppState:
+def catalog_error(exc: CatalogOutdatedError | CatalogNewerError) -> str:
+    if isinstance(exc, CatalogNewerError):
+        return f'The catalog was written by a newer pygeodata; upgrade pygeodata here. ({exc})'
+    where = f' ({exc.writer_root})' if exc.writer_root else ''
+    return f'The catalog was written by an older pygeodata; run `pygeodata catalog build` where it is written{where}.'
+
+
+def build_state(
+    analysis: ProjectAnalysis,
+    read_only: bool | None = None,
+    unavailable_since: dict[str, float] | None = None,
+) -> AppState:
     spec_info.cache_clear()
     version_registry = VersionRegistry()
-    entry_registry = EntryRegistry()
-    entries = EntryStore(entry_registry, analysis.tree_hashes.get, version_registry)
+    try:
+        entry_registry = EntryRegistry(read_only=read_only)
+    except (CatalogOutdatedError, CatalogNewerError) as exc:
+        raise CatalogError(catalog_error(exc)) from exc
+    offline_root = offline_roots(entry_registry)
+    catalog = CatalogContext.build(entry_registry, read_only, offline_root, unavailable_since or {})
+    entries = EntryStore(entry_registry, analysis.tree_hashes.get, version_registry, offline_root)
     diagnostics = dict(entry_registry.diagnostics())
     diagnostics['created_entries'] = len(entries)
+    diagnostics['offline_entries'] = len(offline_root)
     diagnostics['problems'] = analysis.problems
 
     classes = merge_unknown_classes(
@@ -229,4 +267,5 @@ def build_state(analysis: ProjectAnalysis) -> AppState:
         entry_registry=entry_registry,
         version_registry=version_registry,
         analysis=analysis,
+        catalog=catalog,
     )

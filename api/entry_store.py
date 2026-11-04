@@ -25,10 +25,12 @@ class EntryStore:
         entry_registry: EntryRegistry,
         current: Callable[[str], str | None],
         version_registry: VersionRegistry | None = None,
+        offline_root: dict[str, str] | None = None,
     ):
         self._registry = entry_registry
         self._current = current
         self._vreg = version_registry
+        self._offline_root = offline_root or {}
         self._records_by_class: dict[str, list] = {}
         self._records_by_id: dict[str, object] = {}
         self._class_of: dict[str, str] = {}
@@ -88,6 +90,7 @@ class EntryStore:
         for rec in self._records_by_class.get(class_name, []):
             entry = entry_info(self._registry.entries[rec.state_hash], self._registry.get_spec(rec.state_hash))
             self._set_dep_staleness(entry)
+            entry.offline_root = self._offline_root.get(entry.record_id)
             entries.append(entry)
             self._by_id[entry.record_id] = entry
         self._entries_by_class[class_name] = entries
@@ -135,6 +138,14 @@ class EntryStore:
             if rec.params_hash == params_hash and rec.spec_hash == spec_hash and rec.state_hash is not None
         ]
 
+    def offline_count(self) -> int:
+        return len(self._offline_root)
+
+    def _hidden_by_offline(self, state_hash: str, offline_filter: str) -> bool:
+        return (offline_filter == 'online' and state_hash in self._offline_root) or (
+            offline_filter == 'offline' and state_hash not in self._offline_root
+        )
+
     def dep_hash_stale(self, class_name: str, dep_hash: str) -> bool:
         """Per-(class, dep_hash) staleness, memoized."""
         key = (class_name, dep_hash)
@@ -155,6 +166,7 @@ class EntryStore:
         snapshot_dep_hashes: set[str] | None,
         hide_stale: bool,
         object_type_by_class: dict[str, str | None],
+        offline_filter: str = 'all',
     ) -> dict[str, int]:
         """Kind/snapshot/stale counts per class from identity columns only."""
         counts: dict[str, int] = {}
@@ -166,6 +178,8 @@ class EntryStore:
                 if rec.state_hash is None:
                     continue
                 if snapshot_dep_hashes is not None and rec.dependency_tree_hash not in snapshot_dep_hashes:
+                    continue
+                if self._hidden_by_offline(rec.state_hash, offline_filter):
                     continue
                 if hide_stale and (
                     (rec.dependency_tree_hash and self.dep_hash_stale(class_name, rec.dependency_tree_hash))
@@ -185,6 +199,7 @@ class EntryStore:
         snapshot_dep_hashes: set[str] | None,
         hide_stale: bool,
         object_type_by_class: dict[str, str | None],
+        offline_filter: str = 'all',
     ) -> list[str] | None:
         """Visible record ids from identity columns only — no display JSON.
 
@@ -202,6 +217,8 @@ class EntryStore:
                 if rec.state_hash is None:
                     continue
                 if snapshot_dep_hashes is not None and rec.dependency_tree_hash not in snapshot_dep_hashes:
+                    continue
+                if self._hidden_by_offline(rec.state_hash, offline_filter):
                     continue
                 if hide_stale and (
                     (rec.dependency_tree_hash and self.dep_hash_stale(class_name, rec.dependency_tree_hash))

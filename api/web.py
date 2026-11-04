@@ -50,6 +50,12 @@ def _has_current_classes() -> bool:
     return _ctx.state is not None and bool(_ctx.state.analysis.classes)
 
 
+def _refuse_in_mirror() -> None:
+    assert _ctx.state is not None
+    if _ctx.state.catalog.read_only:
+        abort(409, 'The browser is read-only (mirror mode): it never writes into the project')
+
+
 def _loading():
     return ({'loading': True, 'fast': bool(app.config.get('FAST'))}, 202)
 
@@ -225,6 +231,7 @@ def api_classes():
             filters=_query_json('filters', []),
             logic_mode=request.args.get('logic_mode', 'AND'),
             hide_stale=request.args.get('hide_stale') == '1',
+            offline_filter=request.args.get('offline_filter', 'all'),
             version_filter=request.args.get('version_filter') or None,
         ),
     )
@@ -239,7 +246,7 @@ def api_class_entries():
     ids_only = request.args.get('ids_only') == '1'
     only_ids = None
     if request.args.get('pinned_only') == '1':
-        pinned = build_pinned_entries_payload(_ctx.state, store.pinned_hashes())
+        pinned = build_pinned_entries_payload(_ctx.state, _ctx.state.catalog.pinned_hashes())
         only_ids = {p['record_id'] for p in pinned}
         classes = classes or sorted({p['class_name'] for p in pinned})
     if not classes and not ids_only:
@@ -253,6 +260,7 @@ def api_class_entries():
             filters=_query_json('filters', []),
             logic_mode=request.args.get('logic_mode', 'AND'),
             hide_stale=request.args.get('hide_stale') == '1',
+            offline_filter=request.args.get('offline_filter', 'all'),
             version_filter=request.args.get('version_filter') or None,
             offset=request.args.get('offset', 0, type=int),
             limit=request.args.get('limit', 50, type=int),
@@ -280,7 +288,8 @@ def api_find_entries() -> Response | tuple[dict, int]:
 
 
 def _pins_response() -> Response:
-    pins = store.pinned_hashes()
+    assert _ctx.state is not None
+    pins = _ctx.state.catalog.pinned_hashes()
     return jsonify({'pins': build_pinned_entries_payload(_ctx.state, pins)})
 
 
@@ -297,7 +306,7 @@ def api_pin(record_id: str) -> Response | tuple[dict, int]:
         return _loading()
     if record_id not in _ctx.state.entries:
         abort(404)
-    store.set_pinned(record_id, pinned=True)
+    _ctx.state.catalog.set_pinned(record_id, pinned=True)
     return _pins_response()
 
 
@@ -305,7 +314,7 @@ def api_pin(record_id: str) -> Response | tuple[dict, int]:
 def api_unpin(record_id: str) -> Response | tuple[dict, int]:
     if _ctx.is_loading() or _ctx.state is None:
         return _loading()
-    store.set_pinned(record_id, pinned=False)
+    _ctx.state.catalog.set_pinned(record_id, pinned=False)
     return _pins_response()
 
 
@@ -318,7 +327,7 @@ def api_entry_detail(record_id: str):
     if entry is None:
         abort(404)
     vreg = _ctx.state.version_registry
-    etag = f'"{record_id[:16]}-{entry.dep_hash_stale:d}-{entry.format_version_stale:d}-{len(vreg.versions)}"'
+    etag = f'"{record_id[:16]}-{entry.dep_hash_stale:d}-{entry.format_version_stale:d}-{entry.offline:d}-{len(vreg.versions)}"'
     if request.headers.get('If-None-Match') == etag:
         return '', 304
     detail = build_entry_detail_payload(_ctx.state, record_id=record_id)
@@ -336,11 +345,11 @@ _THUMB_WIDTHS = (360, 720)
 
 @app.get('/api/thumb/<record_id>')
 def api_thumb(record_id: str):
-    """Server-resized preview of an entry's primary image, cached under .source/thumbs."""
+    """Server-resized preview of an entry's primary image, cached under the user's cache directory."""
     if _ctx.is_loading() or _ctx.state is None:
         return _loading()
     entry = _ctx.state.entries.get(record_id)
-    if entry is None or entry.primary_file is None or entry.primary_file.kind != 'image':
+    if entry is None or entry.primary_file is None or entry.primary_file.kind != 'image' or entry.offline:
         abort(404)
     width = request.args.get('w', 720, type=int)
     if width not in _THUMB_WIDTHS:
@@ -348,12 +357,10 @@ def api_thumb(record_id: str):
     source = Path(entry.primary_file.path)
     _assert_allowed_path(str(source))
 
-    thumbs_dir = get_config().path_registry.resolve() / 'thumbs'
+    thumbs_dir = _ctx.state.catalog.thumbs_dir
     thumb_path = thumbs_dir / f'{record_id}_{width}.png'
     if not thumb_path.exists():
-        import io
-
-        from PIL import Image
+        from PIL import Image  # noqa: PLC0415 — only needed on the first request of a thumbnail
 
         thumbs_dir.mkdir(parents=True, exist_ok=True)
         with Image.open(source) as img:
@@ -379,6 +386,7 @@ def api_rebuild():
 def api_delete_entry(record_id: str):
     if _ctx.is_loading() or _ctx.state is None:
         return _loading()
+    _refuse_in_mirror()
     entry = _ctx.state.entries.get(record_id)
     if entry is None:
         abort(404)
@@ -394,6 +402,7 @@ def api_delete_entry(record_id: str):
 def api_clean_cache():
     if _ctx.is_loading() or _ctx.state is None:
         return _loading()
+    _refuse_in_mirror()
     body = request.get_json(force=True) or {}
     dry_run = bool(body.get('dry_run', True))
     if not _has_current_classes():
@@ -409,6 +418,9 @@ def api_clean_cache():
 
 @app.post('/api/clean-source')
 def api_clean_source():
+    if _ctx.is_loading() or _ctx.state is None:
+        return _loading()
+    _refuse_in_mirror()
     body = request.get_json(force=True) or {}
     dry_run = bool(body.get('dry_run', True))
     buf = io.StringIO()
@@ -711,18 +723,20 @@ def create_app(
     fast: bool = False,
     reconcile_interval: float = 300,
     import_all: bool = False,
+    read_only: bool | None = None,
 ) -> Flask:
     """``fast`` serves the UI immediately from the bootstrap payload while the
     full state builds; the default blocks until the first full state is ready.
     The project is analysed from source, or with ``import_all`` by importing it in a
     subprocess; the server process never imports project code. A daemon thread polls the
     project's files and, every ``reconcile_interval`` seconds, the catalog (and, with
-    ``import_all``, imports changed code); the state is rebuilt offscreen.
+    ``import_all``, imports changed code); the state is rebuilt offscreen. ``read_only`` forces
+    mirror mode on (True) or off (False); by default it follows the catalog (see ``CatalogContext``).
     """
     global _ctx
     configure_logging(logging.INFO)
     app.config['FAST'] = fast
-    _ctx = AppContext(mode='import' if import_all else 'static')
+    _ctx = AppContext(mode='import' if import_all else 'static', read_only=read_only)
     _ctx.reload()
     _ctx.start_watching(reconcile_interval)
     return app

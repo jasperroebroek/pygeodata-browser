@@ -18,9 +18,10 @@ def open_registry_browser(
     fast: bool = False,
     reconcile_interval: float = 300,
     import_all: bool = False,
+    read_only: bool | None = None,
 ) -> None:
     """Start the registry browser and open it in the default browser."""
-    app = create_app(fast=fast, reconcile_interval=reconcile_interval, import_all=import_all)
+    app = create_app(fast=fast, reconcile_interval=reconcile_interval, import_all=import_all, read_only=read_only)
     server = make_server('127.0.0.1', port, app, server_class=ThreadingWSGIServer)
     host, actual_port = server.server_address
     url = f'http://{host}:{actual_port}'

@@ -6,17 +6,19 @@
   import Search from '@lucide/svelte/icons/search';
   import Table2 from '@lucide/svelte/icons/table-2';
   import {
+    classesState,
     filterState,
     layout,
     pinsState,
     selection,
     setEntriesMode,
     setKindFilter,
+    setOfflineFilter,
     setPinnedOnly,
     toggleSelectMode,
     ui,
   } from '../lib/stores.svelte';
-  import type { KindFilter, View } from '../lib/stores.svelte';
+  import type { KindFilter, OfflineFilter, View } from '../lib/stores.svelte';
   import { codeUi, setBrowseMode, switchView } from '../lib/nav.svelte';
   import type { CodeKind } from '../lib/nav.svelte';
   import { openModal } from '../lib/modal.svelte';
@@ -41,6 +43,12 @@
 
   const isMac = navigator.platform.toLowerCase().includes('mac');
 
+  const offlineCount = $derived(classesState.diagnostics.offline_entries ?? 0);
+
+  // Clicking the active tab clears it, as with the pinned toggle.
+  const toggleOffline = (filter: Exclude<OfflineFilter, 'all'>) =>
+    void setOfflineFilter(filterState.offlineFilter === filter ? 'all' : filter);
+
   const exportCount = $derived(selection.selectedEntries.length);
 </script>
 
@@ -64,6 +72,28 @@
             </button>
           {/each}
         </div>
+        {#if offlineCount > 0}
+          <div class="kind-group">
+            <button
+              class="kind-tab"
+              class:active={filterState.offlineFilter === 'online'}
+              title="Hide entries of unavailable cache roots"
+              aria-pressed={filterState.offlineFilter === 'online'}
+              onclick={() => toggleOffline('online')}
+            >
+              <span class="tab-label" data-label="Online">Online</span>
+            </button>
+            <button
+              class="kind-tab"
+              class:active={filterState.offlineFilter === 'offline'}
+              title="Show only entries of unavailable cache roots"
+              aria-pressed={filterState.offlineFilter === 'offline'}
+              onclick={() => toggleOffline('offline')}
+            >
+              <span class="tab-label" data-label={`Offline (${offlineCount})`}>Offline ({offlineCount})</span>
+            </button>
+          </div>
+        {/if}
         <div class="kind-group">
           <button
             class="kind-tab kind-tab--pinned"
@@ -139,7 +169,7 @@
     {/if}
     <div class="topbar-icons">
       <ViewSettings />
-      <button class="icon-btn" title="Registry diagnostics" onclick={() => openModal('Registry diagnostics', { kind: 'diagnostics' }, 'sm')}>
+      <button class="icon-btn" title="Registry diagnostics" onclick={() => openModal('Registry diagnostics', { kind: 'diagnostics' }, 'md')}>
         <Activity size={20} />
       </button>
       <Menu />
