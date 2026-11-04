@@ -255,7 +255,7 @@ def build_state(
     )
 
     classes = merge_unknown_classes(
-        source_classes(analysis),
+        source_classes(analysis, entry_registry),
         entry_registry,
         analysis.tree_hashes.get,
         version_registry=version_registry,

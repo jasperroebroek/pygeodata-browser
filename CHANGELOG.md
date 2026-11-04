@@ -34,6 +34,8 @@ The version jumps from 0.2 to 0.5 so the two packages share their version number
 - Errors show in a wide, copyable box with Reload and close buttons.
 - The Code tab follows reloads, so runs and reimports appear while it is open.
 - The co-outputs card in the entry detail is shown again.
+- A class's stale dot compares its cache entries with the current code, so deleting
+  `.source/` or a run served from the cache no longer marks current classes stale.
 - Removed the "Has warnings" / "Has error" filters, which never matched anything.
 
 ### Internals
