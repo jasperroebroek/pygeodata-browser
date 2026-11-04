@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from conftest import make_analysis
+from conftest import make_analysis, make_entry_store
 from pygeodata.config import set_config
 from pygeodata.enums import JSONKeys
 from pygeodata.registries.versioning import VersionRegistry
@@ -76,18 +76,20 @@ def test_version_diff_error_paths(tmp_path: Path):
         # dep_hash=None → no_snapshot
         entry_no_dep = _make_entry('rec1', None)
         result = code_service.version_diff(
-            vreg_empty, make_analysis(), record_id='rec1', entries={'rec1': entry_no_dep}
+            vreg_empty, make_analysis(), record_id='rec1', entries=make_entry_store(entry_no_dep)
         )
         assert result == {'error': 'no_snapshot', 'message': 'Snapshot not available for this entry'}
 
         # unknown record_id → __not_found__ sentinel
-        result = code_service.version_diff(vreg_empty, make_analysis(), record_id='missing', entries={})
+        result = code_service.version_diff(vreg_empty, make_analysis(), record_id='missing', entries=make_entry_store())
         assert result.get('__not_found__') is True
 
         # dep_hash present but unknown to any version group → no_snapshot
         vreg = VersionRegistry(registry)
         entry_bad_dep = _make_entry('rec1', 'nonexistent_dep_hash')
-        result = code_service.version_diff(vreg, make_analysis(), record_id='rec1', entries={'rec1': entry_bad_dep})
+        result = code_service.version_diff(
+            vreg, make_analysis(), record_id='rec1', entries=make_entry_store(entry_bad_dep)
+        )
         assert result['error'] == 'no_snapshot'
 
         # neither record_id nor base_version_id → bad_request

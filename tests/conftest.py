@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pygeodata._version import FORMAT_VERSION
@@ -9,6 +10,8 @@ from pygeodata.dependencies import ClassFacts
 from pygeodata.paths import CachePathConstructor
 from pygeodata.records import EntryRecord
 from pygeodata_browser.catalog_context import CatalogContext
+from pygeodata_browser.entry_store import EntryStore
+from pygeodata_browser.models import EntryInfo
 
 
 @pytest.fixture(autouse=True)
@@ -88,3 +91,28 @@ def make_catalog_context(tmp_path: Path, read_only: bool = False) -> CatalogCont
         absolute_dir_entries=0,
         unavailable_roots=[],
     )
+
+
+def make_entry_store(*entries: EntryInfo) -> EntryStore:
+    """A real EntryStore over the given, already enriched entries (their records are derived from them)."""
+    records = [
+        EntryRecord(
+            class_name=e.class_name,
+            source_hash='',
+            dependency_tree_hash=e.dep_hash or '',
+            instance_hash=e.instance_hash or '',
+            params_hash=e.params_hash or '',
+            spec_hash=e.spec_hash or '',
+            state_hash=e.record_id,
+            object_type=e.object_type,
+            co_output_hashes=[],
+            format_version=e.format_version,
+        )
+        for e in entries
+    ]
+    registry = SimpleNamespace(entries={rec.state_hash: SimpleNamespace(record=rec) for rec in records})
+    store = EntryStore(registry, lambda class_name: None)
+    for entry in entries:
+        store._by_id[entry.record_id] = entry
+        store._entries_by_class.setdefault(entry.class_name, []).append(entry)
+    return store

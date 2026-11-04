@@ -194,8 +194,7 @@ def _sidebar_counts(
     offline_filter: str = 'all',
     snapshot_filter: list[str] | None = None,
 ) -> dict[str, int]:
-    store = getattr(state.entries, 'count_by_class', None)
-    if store is not None and not filters and not spec_filters:
+    if not filters and not spec_filters:
         # Fast path: identity-column counts; per-entry display never loads.
         return state.entries.count_by_class(
             kind_filter=kind_filter,
@@ -208,7 +207,7 @@ def _sidebar_counts(
     for class_name, class_info in state.classes.items():
         if kind_filter != 'all' and (class_info.object_type or '').lower() != kind_filter:
             continue
-        record_ids = state.get_state_hashes(class_name)
+        record_ids = state.entry_registry.get_state_hashes(class_name)
         n = sum(
             1
             for rid in record_ids
@@ -258,7 +257,7 @@ def _build_visible_groups(
         if selected_classes and class_name not in selected_classes:
             continue
 
-        record_ids = state.get_state_hashes(class_name)
+        record_ids = state.entry_registry.get_state_hashes(class_name)
 
         visible_entries = [
             state.entries[rid]
@@ -298,7 +297,7 @@ def _build_class_cards(
     # When a snapshot filter is active, derive stale status from the visible entries:
     # a class is stale if any of its snapshot entries have dep_hash_stale=True.
     snapshot_stale_classes: set[str] = set()
-    if snapshot_dep_hashes is not None and hasattr(state.entries, 'dep_hashes'):
+    if snapshot_dep_hashes is not None:
         for class_name in state.entry_registry.class_names:
             if class_name in snapshot_stale_classes:
                 continue
@@ -309,20 +308,11 @@ def _build_class_cards(
                 ):
                     snapshot_stale_classes.add(class_name)
                     break
-    elif snapshot_dep_hashes is not None:
-        for entry in state.entries.values():
-            if entry.dep_hash in snapshot_dep_hashes and entry.dep_hash_stale:
-                snapshot_stale_classes.add(entry.class_name)
 
     class_cards = []
     for class_name, class_info in sorted(state.classes.items()):
-        record_ids = state.get_state_hashes(class_name)
-        if hasattr(state.entries, 'format_version_stale'):
-            format_version_stale = any(state.entries.format_version_stale(rid) for rid in record_ids)
-        else:
-            format_version_stale = any(
-                state.entries[rid].format_version_stale for rid in record_ids if rid in state.entries
-            )
+        record_ids = state.entry_registry.get_state_hashes(class_name)
+        format_version_stale = any(not rec.is_current_format for rec in state.entries.records_for_class(class_name))
         if snapshot_dep_hashes is not None:
             source_stale = class_name in snapshot_stale_classes
             deps_stale = False
@@ -488,28 +478,6 @@ def _params_tree(entry: EntryInfo) -> dict:
         return {}
 
 
-def _build_instance_hash_index(entries: dict[str, 'EntryInfo']) -> dict[str, list['EntryInfo']]:
-    index: dict[str, list[EntryInfo]] = {}
-    for entry in entries.values():
-        if entry.instance_hash:
-            index.setdefault(entry.instance_hash, []).append(entry)
-    return index
-
-
-def _build_params_hash_index(entries: dict[str, 'EntryInfo']) -> dict[tuple[str, str, str], list['EntryInfo']]:
-    """Index by (class_name, params_hash, spec_hash) — groups entries with the same params
-    and spec across dep versions.  params_hash alone under-discriminates for parameterless
-    classes (e.g. a raster loader with no dataclass fields), where every entry across every
-    spec shares one params_hash — spec_hash keeps spec-only variation out of the version list.
-    """
-    index: dict[tuple[str, str, str], list[EntryInfo]] = {}
-    for entry in entries.values():
-        if entry.params_hash and entry.spec_hash:
-            key = (entry.class_name, entry.params_hash, entry.spec_hash)
-            index.setdefault(key, []).append(entry)
-    return index
-
-
 def _dep_version_sibling_payload(entry: EntryInfo, vreg: VersionRegistry, *, is_self: bool = False) -> dict:
     version = vreg.version_for_dep_hash(entry.dep_hash) if entry.dep_hash else None
     return {
@@ -578,39 +546,22 @@ def _build_detail_payload(
             return None
         siblings: list[EntryInfo] = []
         if selected_entry_info.instance_hash:
-            ids_by_instance = getattr(state.entries, 'ids_by_instance_hash', None)
-            if ids_by_instance is not None:
-                sibling_ids = sorted(
-                    (
-                        rid
-                        for rid in ids_by_instance(selected_entry_info.instance_hash)
-                        if rid != selected_entry_info.record_id
-                    ),
-                )
-                siblings = [state.entries.get(rid) for rid in sibling_ids if rid in state.entries]
-            else:
-                index = _build_instance_hash_index(state.entries)
-                siblings = [
-                    e
-                    for e in index.get(selected_entry_info.instance_hash, [])
-                    if e.record_id != selected_entry_info.record_id
-                ]
+            sibling_ids = sorted(
+                rid
+                for rid in state.entries.ids_by_instance_hash(selected_entry_info.instance_hash)
+                if rid != selected_entry_info.record_id
+            )
+            siblings = [state.entries.get(rid) for rid in sibling_ids if rid in state.entries]
         dep_version_entries: list[EntryInfo] = []
         if selected_entry_info.params_hash and selected_entry_info.spec_hash:
-            ids_by_params = getattr(state.entries, 'ids_by_params_hash', None)
-            if ids_by_params is not None:
-                dep_ids = sorted(
-                    ids_by_params(
-                        selected_entry_info.class_name,
-                        selected_entry_info.params_hash,
-                        selected_entry_info.spec_hash,
-                    ),
-                )
-                dep_version_entries = [state.entries.get(rid) for rid in dep_ids if rid in state.entries]
-            else:
-                ph_index = _build_params_hash_index(state.entries)
-                key = (selected_entry_info.class_name, selected_entry_info.params_hash, selected_entry_info.spec_hash)
-                dep_version_entries = list(ph_index.get(key, []))
+            dep_ids = sorted(
+                state.entries.ids_by_params_hash(
+                    selected_entry_info.class_name,
+                    selected_entry_info.params_hash,
+                    selected_entry_info.spec_hash,
+                ),
+            )
+            dep_version_entries = [state.entries.get(rid) for rid in dep_ids if rid in state.entries]
             dep_version_entries.sort(
                 key=lambda e: (
                     vreg.version_for_dep_hash(e.dep_hash).mtime
@@ -692,14 +643,11 @@ def build_classes_payload(
     )
 
     if hide_stale:
-        if hasattr(state.entries, 'records_for_class'):
-            stale_hidden = 0
-            for class_name in state.entry_registry.class_names:
-                for rec in state.entries.records_for_class(class_name):
-                    if rec.dependency_tree_hash and state.entries.dep_hash_stale(class_name, rec.dependency_tree_hash):
-                        stale_hidden += 1
-        else:
-            stale_hidden = sum(1 for e in state.entries.values() if e.dep_hash_stale)
+        stale_hidden = 0
+        for class_name in state.entry_registry.class_names:
+            for rec in state.entries.records_for_class(class_name):
+                if rec.dependency_tree_hash and state.entries.dep_hash_stale(class_name, rec.dependency_tree_hash):
+                    stale_hidden += 1
     else:
         stale_hidden = 0
 
@@ -760,19 +708,16 @@ def build_entries_page_payload(
     version_obj = vreg.version_by_id(version_filter) if version_filter else None
     dep_hash_set = vreg.dep_hashes_for_version(version_obj) if version_obj is not None else None
 
-    if ids_only:
-        fast_ids = getattr(state.entries, 'visible_ids', None)
-        if fast_ids is not None and not parsed_filters and not spec_filters and only_ids is None:
-            ids = fast_ids(
-                selected_classes=selected_classes,
-                kind_filter=kind_filter,
-                snapshot_dep_hashes=dep_hash_set,
-                hide_stale=hide_stale,
-                object_type_by_class={name: ci.object_type for name, ci in state.classes.items()},
-                offline_filter=offline_filter,
-            )
-            if ids is not None:
-                return {'ids': ids, 'total': len(ids)}
+    if ids_only and not parsed_filters and not spec_filters and only_ids is None:
+        ids = state.entries.visible_ids(
+            selected_classes=selected_classes,
+            kind_filter=kind_filter,
+            snapshot_dep_hashes=dep_hash_set,
+            hide_stale=hide_stale,
+            object_type_by_class={name: ci.object_type for name, ci in state.classes.items()},
+            offline_filter=offline_filter,
+        )
+        return {'ids': ids, 'total': len(ids)}
 
     visible_groups = _build_visible_groups(
         state,
@@ -841,8 +786,7 @@ def build_entry_detail_payload(state: AppState, *, record_id: str) -> dict | Non
 
 def _entry_ref(state: AppState, record_id: str) -> dict:
     """Identity of one entry (id, class, kind) without enriching its class."""
-    class_of = getattr(state.entries, 'class_of', None)
-    class_name = class_of(record_id) if class_of else state.entries[record_id].class_name
+    class_name = state.entries.class_of(record_id)
     info = state.classes.get(class_name)
     return {
         'record_id': record_id,

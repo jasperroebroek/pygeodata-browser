@@ -13,6 +13,7 @@ from pygeodata.paths import CodeRegistryPathConstructor
 from pygeodata.registries.versioning import VersionRegistry
 from pygeodata.static import read_class_source
 from pygeodata.views.types import CodeClassState
+from pygeodata_browser.entry_store import EntryStore
 
 
 def _word_segments(text_old: str, text_new: str) -> tuple[list[dict], list[dict]]:
@@ -237,7 +238,7 @@ def version_diff(
     analysis: ProjectAnalysis,
     *,
     record_id: str | None = None,
-    entries: dict | None = None,
+    entries: EntryStore | None = None,
     base_version_id: str | None = None,
     target_version_id: str = 'live',
 ) -> dict:

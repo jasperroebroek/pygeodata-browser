@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from conftest import make_analysis, make_catalog_context, write_entry
+from conftest import make_analysis, make_catalog_context, make_entry_store, write_entry
 from pygeodata.config import set_config
 from pygeodata.registries.registry import EntryRegistry
 from pygeodata.registries.versioning import VersionRegistry
@@ -27,7 +27,7 @@ def _make_ready_ctx(version_registry: VersionRegistry | None = None):
     ctx = AppContext()
     ctx.state = AppState(
         classes={},
-        entries={},
+        entries=make_entry_store(),
         diagnostics={},
         spec_options={},
         entry_registry=_FakeEntryRegistry(),
@@ -530,7 +530,7 @@ def _make_entry(record_id: str, dep_hash: str | None):
 def test_api_code_version_diff_no_snapshot(tmp_path: Path) -> None:
     entry = _make_entry('rec1', None)
     ctx = _make_ready_ctx()
-    ctx.state.entries = {'rec1': entry}
+    ctx.state.entries = make_entry_store(entry)
     with patch('pygeodata_browser.web._ctx', ctx):
         resp = flask_app.test_client().get('/api/code/version-diff?record_id=rec1')
     assert resp.status_code == 200
@@ -593,7 +593,7 @@ def test_api_code_version_diff_returns_changes(tmp_path: Path) -> None:
     entry = _make_entry('rec1', 'snapshot1')
     with set_config(path_cache=tmp_path / 'data', path_figures=tmp_path / 'figs', path_registry=registry):
         ctx = _make_ready_ctx(VersionRegistry(registry))
-        ctx.state.entries = {'rec1': entry}
+        ctx.state.entries = make_entry_store(entry)
         flask_app.config['TESTING'] = True
         with patch('pygeodata_browser.web._ctx', ctx):
             resp = flask_app.test_client().get('/api/code/version-diff?record_id=rec1')

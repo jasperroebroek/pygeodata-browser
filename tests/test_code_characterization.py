@@ -19,7 +19,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from conftest import make_analysis, make_catalog_context
+from conftest import make_analysis, make_catalog_context, make_entry_store
 from pygeodata.config import set_config
 from pygeodata.enums import JSONKeys
 from pygeodata.registries.versioning import VersionRegistry
@@ -69,7 +69,7 @@ def _make_ready_ctx(version_registry: VersionRegistry | None = None):
     ctx = AppContext()
     ctx.state = AppState(
         classes={},
-        entries={},
+        entries=make_entry_store(),
         diagnostics={},
         spec_options={},
         entry_registry=_FakeEntryRegistry(),
@@ -326,7 +326,7 @@ def test_no_dep_hash_returns_no_snapshot():
     """Entry with dep_hash=None → error: no_snapshot, no HTTP error."""
     entry = _make_entry('rec_none', None)
     ctx = _make_ready_ctx()
-    ctx.state.entries = {'rec_none': entry}
+    ctx.state.entries = make_entry_store(entry)
     with patch('pygeodata_browser.web._ctx', ctx):
         resp = flask_app.test_client().get('/api/code/version-diff?record_id=rec_none')
 
@@ -339,7 +339,7 @@ def test_changed_class_payload(sample_ctx):
     """Entry with snapshot_pre: MyLoader changed (v1→v2), MyDep unchanged."""
     ctx, tmp_path, registry = sample_ctx
     entry = _make_entry('rec1', 'snapshot_pre')
-    ctx.state.entries = {'rec1': entry}
+    ctx.state.entries = make_entry_store(entry)
 
     with set_config(path_cache=tmp_path / 'data', path_figures=tmp_path / 'figs', path_registry=registry):
         flask_app.config['TESTING'] = True
@@ -362,7 +362,7 @@ def test_changed_class_payload(sample_ctx):
 def test_unchanged_class_diff_is_none(sample_ctx):
     ctx, tmp_path, registry = sample_ctx
     entry = _make_entry('rec1', 'snapshot_pre')
-    ctx.state.entries = {'rec1': entry}
+    ctx.state.entries = make_entry_store(entry)
 
     with set_config(path_cache=tmp_path / 'data', path_figures=tmp_path / 'figs', path_registry=registry):
         flask_app.config['TESTING'] = True
@@ -380,7 +380,7 @@ def test_sort_order_changed_before_unchanged(sample_ctx):
     """Both changed and unchanged statuses must be present (order is client-side)."""
     ctx, tmp_path, registry = sample_ctx
     entry = _make_entry('rec1', 'snapshot_pre')
-    ctx.state.entries = {'rec1': entry}
+    ctx.state.entries = make_entry_store(entry)
 
     with set_config(path_cache=tmp_path / 'data', path_figures=tmp_path / 'figs', path_registry=registry):
         flask_app.config['TESTING'] = True
@@ -396,7 +396,7 @@ def test_post_change_snapshot_all_unchanged(sample_ctx):
     """snapshot_post uses v2hash for MyLoader — same as live → all unchanged."""
     ctx, tmp_path, registry = sample_ctx
     entry = _make_entry('rec2', 'snapshot_post')
-    ctx.state.entries = {'rec2': entry}
+    ctx.state.entries = make_entry_store(entry)
 
     with set_config(path_cache=tmp_path / 'data', path_figures=tmp_path / 'figs', path_registry=registry):
         flask_app.config['TESTING'] = True
@@ -411,7 +411,7 @@ def test_top_level_keys_when_changes_present(sample_ctx):
     """Successful version-diff response must have changes, base_version_id, has_live_stale."""
     ctx, tmp_path, registry = sample_ctx
     entry = _make_entry('rec1', 'snapshot_pre')
-    ctx.state.entries = {'rec1': entry}
+    ctx.state.entries = make_entry_store(entry)
 
     with set_config(path_cache=tmp_path / 'data', path_figures=tmp_path / 'figs', path_registry=registry):
         flask_app.config['TESTING'] = True
@@ -428,7 +428,7 @@ def test_changed_entry_keys(sample_ctx):
     """A 'changed' entry must carry class_name, status, diff, full_old, full_new."""
     ctx, tmp_path, registry = sample_ctx
     entry = _make_entry('rec1', 'snapshot_pre')
-    ctx.state.entries = {'rec1': entry}
+    ctx.state.entries = make_entry_store(entry)
 
     with set_config(path_cache=tmp_path / 'data', path_figures=tmp_path / 'figs', path_registry=registry):
         flask_app.config['TESTING'] = True

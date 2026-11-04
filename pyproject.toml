@@ -22,6 +22,7 @@ dependencies = [
     "pygeodata>=0.4,<0.5",  # needs the 0.4 identity-aware instance hashes (pins table, partial specs)
     "flask",
     "platformdirs",
+    "pillow",
 ]
 
 [project.urls]

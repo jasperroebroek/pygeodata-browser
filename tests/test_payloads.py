@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import make_analysis, make_catalog_context
+from conftest import make_analysis, make_catalog_context, make_entry_store
 from pygeodata.catalog.types import LinkedEntry, ParamRow, ParamRowType
 from pygeodata.enums import JSONKeys, SpecKeys
 from pygeodata.views.filters import Filter, FilterTarget
@@ -108,6 +108,10 @@ class _FakeEntryRegistry:
     def get_object_type(self, class_name: str) -> str | None:
         return None
 
+    @property
+    def class_names(self) -> list[str]:
+        return list(self._groups)
+
 
 class _FakeSourceRegistry:
     def get_states(self, class_name: str) -> list:
@@ -128,7 +132,7 @@ class _FakeVersionRegistry:
 
 
 def make_state(entries=None, classes=None, groups=None):
-    entries = entries or {}
+    entries = entries or make_entry_store()
     classes = classes or {}
     groups = groups or {}
     return AppState(
@@ -147,7 +151,7 @@ def simple_state():
     entry = make_entry(record_id='rec1', class_name='MyLoader')
     cls = make_class_info('MyLoader')
     return make_state(
-        entries={'rec1': entry},
+        entries=make_entry_store(entry),
         classes={'MyLoader': cls},
         groups={'MyLoader': ['rec1']},
     )
@@ -281,7 +285,7 @@ def test_sidebar_counts_kind_filter_excludes():
 def test_sidebar_counts_zero_not_included():
     entry = make_entry(spec=make_spec(crs='EPSG:4326'))
     cls = make_class_info('MyLoader')
-    state = make_state(entries={'rec1': entry}, classes={'MyLoader': cls}, groups={'MyLoader': ['rec1']})
+    state = make_state(entries=make_entry_store(entry), classes={'MyLoader': cls}, groups={'MyLoader': ['rec1']})
     counts = _sidebar_counts(
         state,
         kind_filter='all',
@@ -296,7 +300,7 @@ def test_sidebar_counts_multiple_entries():
     e1 = make_entry(record_id='r1', class_name='MyLoader')
     e2 = make_entry(record_id='r2', class_name='MyLoader')
     cls = make_class_info('MyLoader')
-    state = make_state(entries={'r1': e1, 'r2': e2}, classes={'MyLoader': cls}, groups={'MyLoader': ['r1', 'r2']})
+    state = make_state(entries=make_entry_store(e1, e2), classes={'MyLoader': cls}, groups={'MyLoader': ['r1', 'r2']})
     counts = _sidebar_counts(state, kind_filter='all', spec_filters={}, filters=[], logic_mode='AND')
     assert counts['MyLoader'] == 2
 
@@ -339,7 +343,7 @@ def test_build_visible_groups_sorted_by_class_name():
     e1 = make_entry(record_id='r1', class_name='ZLoader')
     e2 = make_entry(record_id='r2', class_name='ALoader')
     state = make_state(
-        entries={'r1': e1, 'r2': e2},
+        entries=make_entry_store(e1, e2),
         classes={'ZLoader': make_class_info('ZLoader'), 'ALoader': make_class_info('ALoader')},
         groups={'ZLoader': ['r1'], 'ALoader': ['r2']},
     )
@@ -531,7 +535,7 @@ def test_build_table_rows_missing_class_info():
 def test_build_detail_payload_selected_entry():
     entry = make_entry(record_id='rec1', class_name='MyLoader')
     cls = make_class_info('MyLoader')
-    state = make_state(entries={'rec1': entry}, classes={'MyLoader': cls})
+    state = make_state(entries=make_entry_store(entry), classes={'MyLoader': cls})
     detail = _build_detail_payload(
         state=state,
         selected_entry_info=entry,
@@ -595,7 +599,7 @@ def test_build_detail_payload_figure_preview():
     file_ref = FileRef(label='fig.png', path='/data/fig.png', kind='image')
     entry = make_entry(record_id='rec1', class_name='MyLoader', primary_file=file_ref)
     cls = make_class_info('MyLoader')
-    state = make_state(entries={'rec1': entry}, classes={'MyLoader': cls})
+    state = make_state(entries=make_entry_store(entry), classes={'MyLoader': cls})
     detail = _build_detail_payload(
         state=state,
         selected_entry_info=entry,
@@ -609,7 +613,7 @@ def test_build_detail_payload_no_preview_for_non_image():
     file_ref = FileRef(label='data.tif', path='/data/data.tif', kind='raster')
     entry = make_entry(record_id='rec1', class_name='MyLoader', primary_file=file_ref)
     cls = make_class_info('MyLoader')
-    state = make_state(entries={'rec1': entry}, classes={'MyLoader': cls})
+    state = make_state(entries=make_entry_store(entry), classes={'MyLoader': cls})
     detail = _build_detail_payload(
         state=state,
         selected_entry_info=entry,
@@ -623,7 +627,7 @@ def test_build_detail_payload_table_preview():
     file_ref = FileRef(label='preview.html', path='/data/preview.html', kind='table')
     entry = make_entry(record_id='rec1', class_name='MyTable', primary_file=file_ref)
     cls = make_class_info('MyTable')
-    state = make_state(entries={'rec1': entry}, classes={'MyTable': cls})
+    state = make_state(entries=make_entry_store(entry), classes={'MyTable': cls})
     detail = _build_detail_payload(
         state=state,
         selected_entry_info=entry,
@@ -638,7 +642,7 @@ def test_build_detail_payload_no_table_preview_for_non_table():
     file_ref = FileRef(label='fig.png', path='/data/fig.png', kind='image')
     entry = make_entry(record_id='rec1', class_name='MyLoader', primary_file=file_ref)
     cls = make_class_info('MyLoader')
-    state = make_state(entries={'rec1': entry}, classes={'MyLoader': cls})
+    state = make_state(entries=make_entry_store(entry), classes={'MyLoader': cls})
     detail = _build_detail_payload(
         state=state,
         selected_entry_info=entry,
@@ -656,7 +660,7 @@ def test_build_detail_payload_co_outputs_key_matches_frontend():
     co_entry = make_entry(record_id='co1', class_name='CoLoader')
     entry = make_entry(record_id='rec1', class_name='MyLoader', co_outputs=[co_entry])
     cls = make_class_info('MyLoader')
-    state = make_state(entries={'rec1': entry}, classes={'MyLoader': cls})
+    state = make_state(entries=make_entry_store(entry), classes={'MyLoader': cls})
     detail = _build_detail_payload(
         state=state,
         selected_entry_info=entry,
@@ -673,7 +677,7 @@ def test_build_detail_payload_linked_entries():
     le = LinkedEntry(param_name='base', class_name='BaseLoader', state_hash='x')
     entry = make_entry(record_id='rec1', class_name='MyLoader', linked_entries=[le])
     cls = make_class_info('MyLoader')
-    state = make_state(entries={'rec1': entry}, classes={'MyLoader': cls})
+    state = make_state(entries=make_entry_store(entry), classes={'MyLoader': cls})
     detail = _build_detail_payload(
         state=state,
         selected_entry_info=entry,
@@ -707,7 +711,7 @@ def test_linked_entry_summary_keeps_every_list_value() -> None:
     ]
     le = LinkedEntry(param_name='diseases', class_name='DiseaseSpec', state_hash=None)
     entry = make_entry(rows=rows, linked_entries=[le])
-    state = make_state(entries={'rec1': entry}, classes={'MyLoader': make_class_info('MyLoader')})
+    state = make_state(entries=make_entry_store(entry), classes={'MyLoader': make_class_info('MyLoader')})
     detail = _build_detail_payload(
         state=state,
         selected_entry_info=entry,
@@ -837,11 +841,11 @@ def test_version_groups_v1_has_entries_when_entry_points_there(tmp_path: Path) -
 
 def _wide_state(n_entries: int = 5, rows_per_entry: int = 4) -> AppState:
     rows = [make_row(key=f'k{i}', path=f'k{i}') for i in range(rows_per_entry)]
-    entries = {f'rec{i}': make_entry(record_id=f'rec{i}', rows=rows) for i in range(n_entries)}
+    entries = [make_entry(record_id=f'rec{i}', rows=rows) for i in range(n_entries)]
     return make_state(
-        entries=entries,
+        entries=make_entry_store(*entries),
         classes={'MyLoader': make_class_info('MyLoader')},
-        groups={'MyLoader': list(entries)},
+        groups={'MyLoader': [e.record_id for e in entries]},
     )
 
 
@@ -910,7 +914,7 @@ def test_linked_entry_summary_resolves_repeated_param_names() -> None:
         LinkedEntry(param_name='df_loader', class_name='Inner', state_hash=None),
     ]
     entry = make_entry(rows=rows, linked_entries=links)
-    state = make_state(entries={'rec1': entry}, classes={'MyLoader': make_class_info('MyLoader')})
+    state = make_state(entries=make_entry_store(entry), classes={'MyLoader': make_class_info('MyLoader')})
     detail = _build_detail_payload(
         state=state,
         selected_entry_info=entry,
@@ -925,11 +929,13 @@ def test_linked_entry_summary_resolves_repeated_param_names() -> None:
 
 
 def test_find_entries_by_id_prefix() -> None:
-    entries = {
-        rid: make_entry(record_id=rid, class_name=cls)
+    entries = [
+        make_entry(record_id=rid, class_name=cls)
         for rid, cls in [('abc123', 'MyLoader'), ('abd999', 'MyLoader'), ('ffff00', 'Other')]
-    }
-    state = make_state(entries=entries, classes={'MyLoader': make_class_info('MyLoader', object_type='table')})
+    ]
+    state = make_state(
+        entries=make_entry_store(*entries), classes={'MyLoader': make_class_info('MyLoader', object_type='table')}
+    )
     assert build_find_entries_payload(state, 'ab') == [
         {'record_id': 'abc123', 'class_name': 'MyLoader', 'object_type': 'table'},
         {'record_id': 'abd999', 'class_name': 'MyLoader', 'object_type': 'table'},
@@ -943,8 +949,8 @@ def test_find_entries_by_id_prefix() -> None:
 
 
 def test_pinned_entries_skip_missing_and_keep_order() -> None:
-    entries = {rid: make_entry(record_id=rid, class_name='MyLoader') for rid in ('aaa', 'bbb')}
-    state = make_state(entries=entries, classes={'MyLoader': make_class_info('MyLoader')})
+    entries = [make_entry(record_id=rid, class_name='MyLoader') for rid in ('aaa', 'bbb')]
+    state = make_state(entries=make_entry_store(*entries), classes={'MyLoader': make_class_info('MyLoader')})
     assert build_pinned_entries_payload(state, ['bbb', 'gone', 'aaa']) == [
         {'record_id': 'bbb', 'class_name': 'MyLoader', 'object_type': 'data'},
         {'record_id': 'aaa', 'class_name': 'MyLoader', 'object_type': 'data'},

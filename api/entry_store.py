@@ -9,7 +9,6 @@ dashboard requests stay on the fast path.
 
 from collections.abc import Callable
 
-from pygeodata._version import FORMAT_VERSION
 from pygeodata.enums import Staleness
 from pygeodata.registries.registry import EntryRegistry
 from pygeodata.registries.versioning import VersionRegistry
@@ -32,12 +31,10 @@ class EntryStore:
         self._vreg = version_registry
         self._offline_root = offline_root or {}
         self._records_by_class: dict[str, list] = {}
-        self._records_by_id: dict[str, object] = {}
         self._class_of: dict[str, str] = {}
         for entry in entry_registry.entries.values():
             rec = entry.record
             self._records_by_class.setdefault(rec.class_name or '', []).append(rec)
-            self._records_by_id[rec.state_hash] = rec
             self._class_of[rec.state_hash] = rec.class_name or ''
         self._entries_by_class: dict[str, list[EntryInfo]] = {}
         self._by_id: dict[str, EntryInfo] = {}
@@ -112,9 +109,6 @@ class EntryStore:
     def class_of(self, record_id: str) -> str | None:
         return self._class_of.get(record_id)
 
-    def record(self, record_id: str):
-        return self._records_by_id.get(record_id)
-
     def dep_hashes(self) -> set[str]:
         return {
             rec.dependency_tree_hash
@@ -155,10 +149,6 @@ class EntryStore:
             self._stale_by_dep[key] = cached
         return cached
 
-    def format_version_stale(self, record_id: str) -> bool:
-        rec = self.record(record_id)
-        return rec is not None and (rec.format_version or FORMAT_VERSION) != FORMAT_VERSION
-
     def count_by_class(
         self,
         *,
@@ -183,7 +173,7 @@ class EntryStore:
                     continue
                 if hide_stale and (
                     (rec.dependency_tree_hash and self.dep_hash_stale(class_name, rec.dependency_tree_hash))
-                    or self.format_version_stale(rec.state_hash)
+                    or not rec.is_current_format
                 ):
                     continue
                 n += 1
@@ -200,12 +190,11 @@ class EntryStore:
         hide_stale: bool,
         object_type_by_class: dict[str, str | None],
         offline_filter: str = 'all',
-    ) -> list[str] | None:
+    ) -> list[str]:
         """Visible record ids from identity columns only — no display JSON.
 
         Valid only when no param filters and no spec filters are active; callers
-        must fall back to the enriched path otherwise. Returns None when this
-        store does not support the fast path (eager, non-catalog builds).
+        must fall back to the enriched path otherwise.
         """
         ids: list[str] = []
         for class_name in sorted(self._records_by_class):
@@ -222,7 +211,7 @@ class EntryStore:
                     continue
                 if hide_stale and (
                     (rec.dependency_tree_hash and self.dep_hash_stale(class_name, rec.dependency_tree_hash))
-                    or self.format_version_stale(rec.state_hash)
+                    or not rec.is_current_format
                 ):
                     continue
                 ids.append(rec.state_hash)

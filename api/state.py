@@ -20,7 +20,6 @@ from pygeodata.views.entries import spec_options
 from pygeodata.views.types import ClassInfo, spec_info
 from pygeodata_browser.catalog_context import CatalogContext, offline_roots
 from pygeodata_browser.entry_store import EntryStore
-from pygeodata_browser.models import EntryInfo
 
 _log = logging.getLogger(__name__)
 
@@ -60,25 +59,18 @@ def code_signature(root: Path) -> dict[str, int]:
 class AppState:
     """Wires the entry and version registries together for the browser.
 
-    ``entries`` is the browser-enriched view; with a catalog it is a lazy
-    per-class store (see ``entry_store.EntryStore``), otherwise a plain dict.
+    ``entries`` is the browser-enriched view: a lazy per-class store (see ``entry_store.EntryStore``).
     ``groups`` is a thin accessor over the held entry registry instance.
     """
 
     classes: dict[str, ClassInfo]
-    entries: 'EntryStore | dict[str, EntryInfo]'
+    entries: EntryStore
     diagnostics: dict
     spec_options: dict[str, list[str]]
     entry_registry: EntryRegistry
     version_registry: VersionRegistry
     analysis: ProjectAnalysis
     catalog: CatalogContext
-
-    def get_state_hashes(self, class_name: str) -> list[str]:
-        return self.entry_registry.get_state_hashes(class_name)
-
-    def get_object_type(self, class_name: str) -> str | None:
-        return self.entry_registry.get_object_type(class_name)
 
 
 class AppContext:
@@ -205,9 +197,6 @@ def _prewarm_async(ctx: AppContext, state: AppState) -> None:
 
     def _warm():
         try:
-            for_class = getattr(state.entries, 'for_class', None)
-            if for_class is None:
-                return
             todo = [
                 class_name
                 for class_name in state.entry_registry.class_names
@@ -217,7 +206,7 @@ def _prewarm_async(ctx: AppContext, state: AppState) -> None:
             for class_name in todo:
                 if state is not ctx.state:
                     return  # a reload replaced this state; stop warming it
-                for_class(class_name)
+                state.entries.for_class(class_name)
         except Exception:
             _log.debug('prewarm failed', exc_info=True)
 

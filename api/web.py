@@ -21,6 +21,7 @@ from flask import (
     send_file,
     send_from_directory,
 )
+from PIL import Image
 from pygeodata.cache import clean_cache, clean_source_registry
 from pygeodata.catalog import store
 from pygeodata.catalog.types import CatalogData, CatalogEntry
@@ -134,8 +135,14 @@ def _bootstrap_row(entry: CatalogEntry) -> dict:
 @app.get('/api/bootstrap')
 def api_bootstrap() -> Response:
     """Most recent entry per class — served instantly while the full state builds."""
+    state = _ctx.state
     try:
-        rows = [_bootstrap_row(e) for e in store.bootstrap_rows(CatalogData.from_file(store.catalog_path()))]
+        if state is not None:
+            registry = state.entry_registry
+            catalog = CatalogData(header=registry.header, entries=registry.entries, specs=registry.specs)
+        else:
+            catalog = CatalogData.from_file(store.catalog_path())
+        rows = [_bootstrap_row(e) for e in store.bootstrap_rows(catalog)]
     except Exception:  # noqa: BLE001 — bootstrap is best-effort; the full load follows
         rows = []
     return jsonify(rows)
@@ -360,8 +367,6 @@ def api_thumb(record_id: str):
     thumbs_dir = _ctx.state.catalog.thumbs_dir
     thumb_path = thumbs_dir / f'{record_id}_{width}.png'
     if not thumb_path.exists():
-        from PIL import Image  # noqa: PLC0415 — only needed on the first request of a thumbnail
-
         thumbs_dir.mkdir(parents=True, exist_ok=True)
         with Image.open(source) as img:
             img.thumbnail((width, width * 8))
@@ -438,14 +443,9 @@ def api_code_versions():
     if _ctx.is_loading() or _ctx.state is None:
         return _loading()
 
-    _entries = _ctx.state.entries
-    if hasattr(_entries, 'dep_hashes'):
-        entry_dep_hashes = _entries.dep_hashes()
-    else:
-        entry_dep_hashes = {e.dep_hash for e in _entries.values() if e.dep_hash}
     return jsonify(
         {
-            'versions': payloads.version_groups_payload(_ctx.state.version_registry, entry_dep_hashes),
+            'versions': payloads.version_groups_payload(_ctx.state.version_registry, _ctx.state.entries.dep_hashes()),
             'has_live_classes': _has_current_classes(),
         },
     )

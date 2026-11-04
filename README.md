@@ -4,12 +4,9 @@ QC and code-review dashboard for [pygeodata](../pygeodata) projects. Serves the
 registry browser: class column, entries table, entry detail popups, code
 versioning view, export view, and bounds map.
 
-The CLI stays in core — `pygeodata browse` delegates to this package. To run
-standalone:
-
-```
-python -m pygeodata_browser
-```
+The CLI stays in core — `pygeodata browse` delegates to this package, and its options
+are defined there once. `python -m pygeodata_browser [OPTIONS]` runs that same command
+(`pygeodata browse [OPTIONS]`), settings modules included.
 
 It reads a pygeodata project's on-disk state: the `.source/` registries, the
 cache roots and the catalog JSON.
