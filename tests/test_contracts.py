@@ -41,6 +41,7 @@ MIRRORS: dict[str, tuple[type, ...]] = {
     'StatusPayload': (contracts.StatusPayload,),
     'UnavailableRoot': (contracts.UnavailableRoot,),
     'CatalogInfo': (contracts.CatalogInfo,),
+    'ReaderInfo': (contracts.ReaderInfo,),
     'Diagnostics': (contracts.Diagnostics,),
     'SpecOption': (contracts.SpecOption,),
     'SpecOptions': (contracts.SpecOptions,),

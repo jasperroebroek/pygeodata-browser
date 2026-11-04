@@ -102,11 +102,23 @@
   const details = $derived.by(() => {
     if (!catalog) return [];
     const w = catalog.writer;
+    const r = catalog.reader;
     return [
       { label: 'Written from', value: w.root, mono: true, copy: true },
       { label: 'Host', value: w.host },
       { label: 'Written', value: `${stamp(w.written_at)} · ${relativeTime(w.written_at)}` },
-      { label: 'pygeodata / Python', value: `${w.pygeodata} / ${w.python}` },
+      { label: 'Written with', value: `pygeodata ${w.pygeodata}` },
+      { label: 'Writer Python', value: w.python },
+      { label: 'This browser', value: `pygeodata-browser ${r.browser} · pygeodata ${r.pygeodata}` },
+      { label: 'Browser Python', value: r.python },
+      {
+        label: 'Catalog version',
+        value:
+          catalog.catalog_version === r.catalog_version
+            ? `${catalog.catalog_version}`
+            : `${catalog.catalog_version} (this pygeodata reads ${r.catalog_version})`,
+      },
+      { label: 'Cache format', value: `${r.format_version}` },
       { label: 'Catalog id', value: catalog.catalog_id, mono: true, copy: true },
       { label: 'Pins file', value: catalog.pins_path, mono: true, copy: true },
       { label: 'Thumbnails', value: catalog.thumbs_path, mono: true, copy: true },

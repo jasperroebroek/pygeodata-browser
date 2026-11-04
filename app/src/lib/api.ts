@@ -212,12 +212,22 @@ export interface UnavailableRoot {
   since: number;
 }
 
+export interface ReaderInfo {
+  browser: string;
+  pygeodata: string;
+  python: string;
+  catalog_version: number;
+  format_version: number;
+}
+
 export interface CatalogInfo {
   mode: 'mirror' | 'writable';
   read_only: boolean;
   reason: string;
   catalog_id: string;
+  catalog_version: number;
   writer: { root: string; host: string; written_at: number; pygeodata: string; python: string };
+  reader: ReaderInfo;
   pins_path: string;
   thumbs_path: string;
   absolute_dir_entries: number;

@@ -416,7 +416,11 @@ def _preview_path(entry: EntryInfo, kind: str) -> str | None:
     return file.path if file and file.kind == kind and not entry.offline else None
 
 
-def _entry_detail_payload(entry: EntryInfo, same_instance_runs: list[EntryInfo]) -> EntryDetail:
+def _entry_detail_payload(
+    entry: EntryInfo,
+    co_outputs: list[EntryInfo],
+    same_instance_runs: list[EntryInfo],
+) -> EntryDetail:
     return EntryDetail(
         record_id=entry.record_id,
         state_hash=entry.state_hash,
@@ -435,7 +439,7 @@ def _entry_detail_payload(entry: EntryInfo, same_instance_runs: list[EntryInfo])
         sidecar_files=entry.sidecar_files,
         figure_preview=_preview_path(entry, 'image'),
         table_preview=_preview_path(entry, 'table'),
-        co_outputs=[_co_output_payload(e, entry) for e in entry.co_outputs],
+        co_outputs=[_co_output_payload(e, entry) for e in co_outputs],
         same_instance_runs=[_same_instance_run_payload(s) for s in same_instance_runs],
         rows=[_row_payload(r) for r in entry.rows],
         params_tree=format_json(_params_tree(entry)),
@@ -557,7 +561,11 @@ def _build_detail_payload(*, state: AppState, entry: EntryInfo) -> DetailPayload
         dep_version_siblings=[
             _dep_version_sibling_payload(e, vreg, is_self=e.record_id == entry.record_id) for e in dep_version_entries
         ],
-        selected_entry=_entry_detail_payload(entry, siblings),
+        selected_entry=_entry_detail_payload(
+            entry,
+            [co for h in entry.co_output_hashes if (co := state.entries.get(h)) is not None],
+            siblings,
+        ),
     )
 
 

@@ -7,6 +7,7 @@ one), so its state is keyed by a hash of the resolved project root instead.
 """
 
 import hashlib
+import platform
 import threading
 import time
 from collections import Counter
@@ -15,12 +16,15 @@ from pathlib import Path
 
 import msgspec
 from platformdirs import user_cache_dir, user_data_dir
+from pygeodata._version import CATALOG_VERSION, FORMAT_VERSION
+from pygeodata._version import __version__ as pygeodata_version
 from pygeodata.catalog import store
 from pygeodata.catalog.types import CatalogEntry, CatalogHeader, Pin
 from pygeodata.config import get_config
 from pygeodata.fileio import read_typed_json, write_typed_json_atomic
 from pygeodata.registries.registry import EntryRegistry
-from pygeodata_browser.contracts import CatalogInfo, UnavailableRoot
+from pygeodata_browser._version import __version__ as browser_version
+from pygeodata_browser.contracts import CatalogInfo, ReaderInfo, UnavailableRoot
 
 APP_NAME = 'pygeodata-browser'
 
@@ -135,7 +139,15 @@ class CatalogContext:
             read_only=self.read_only,
             reason=self.reason,
             catalog_id=self.header.catalog_id,
+            catalog_version=self.header.catalog_version,
             writer=self.header.writer,
+            reader=ReaderInfo(
+                browser=browser_version,
+                pygeodata=pygeodata_version,
+                python=platform.python_version(),
+                catalog_version=CATALOG_VERSION,
+                format_version=FORMAT_VERSION,
+            ),
             pins_path=str(self.pins_path),
             thumbs_path=str(self.thumbs_dir),
             absolute_dir_entries=self.absolute_dir_entries,

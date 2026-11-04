@@ -40,7 +40,6 @@ class EntryInfo:
     dep_hash: str | None = None
     dep_hash_stale: bool = False
     offline_root: str | None = None
-    co_outputs: list[EntryInfo] = field(default_factory=list)
 
     @property
     def format_version_stale(self) -> bool:

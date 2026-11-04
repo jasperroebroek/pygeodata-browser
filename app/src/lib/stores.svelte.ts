@@ -69,6 +69,8 @@ export const ui = $state({
   loadError: null as string | null,
   // a state was built at least once, so a failed reload still shows the previous one
   hasState: false,
+  // the server's state version; it changes whenever the server rebuilt its state
+  stateVersion: 0,
   fast: false,
   hasLiveClasses: false,
   mode: 'static' as 'static' | 'import',
@@ -787,6 +789,7 @@ async function onReady() {
 function applyStatus(status: StatusPayload) {
   ui.loadError = status.load_error;
   ui.hasState = status.version > 0;
+  ui.stateVersion = status.version;
   ui.hasLiveClasses = status.has_live_classes;
   ui.mode = status.mode;
   ui.codeChangedSince = status.code_changed_since;

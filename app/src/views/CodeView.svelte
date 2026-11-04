@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { filterState, layout, navigateToClass } from '../lib/stores.svelte';
+  import { filterState, layout, navigateToClass, ui } from '../lib/stores.svelte';
   import { codeNav, codeUi } from '../lib/nav.svelte';
   import { toast } from '../lib/toast.svelte';
   import {
@@ -88,6 +88,7 @@
       }
       if (mySeq !== loadSeq) return;
       versions = resp.versions;
+      allClasses = [];
       hasLiveClasses = resp.has_live_classes;
       hasLiveStale = false;
       if (hasLiveClasses && versions.length) {
@@ -465,8 +466,10 @@
 
   let started = false;
 
+  // again whenever the server rebuilt its state: a run or a reimport may have added versions
   $effect(() => {
-    void load();
+    void ui.stateVersion;
+    untrack(() => void load());
   });
 
   // Once versions are in: handle a pending navigation target, else the browse mode default.

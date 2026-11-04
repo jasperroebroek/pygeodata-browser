@@ -61,7 +61,7 @@ def make_entry(
     spec=None,
     state_hash='abc',
     primary_file=None,
-    co_outputs=None,
+    co_output_hashes=None,
     linked_entries=None,
     dep_hash_stale=False,
     params_hash='params_hash',
@@ -81,7 +81,7 @@ def make_entry(
         spec=spec or make_spec(),
         rows=rows or [],
         primary_file=primary_file,
-        co_outputs=co_outputs or [],
+        co_output_hashes=co_output_hashes or [],
         linked_entries=linked_entries or [],
         dep_hash_stale=dep_hash_stale,
     )
@@ -589,9 +589,9 @@ def test_build_detail_payload_no_table_preview_for_non_table():
 
 def test_build_detail_payload_co_outputs():
     co_entry = make_entry(record_id='co1', class_name='CoLoader')
-    entry = make_entry(record_id='rec1', class_name='MyLoader', co_outputs=[co_entry])
+    entry = make_entry(record_id='rec1', class_name='MyLoader', co_output_hashes=['co1', 'gone'])
     cls = make_class_info('MyLoader')
-    state = make_state(entries=make_entry_store(entry), classes={'MyLoader': cls})
+    state = make_state(entries=make_entry_store(entry, co_entry), classes={'MyLoader': cls})
     detail = _build_detail_payload(state=state, entry=entry)
     assert [co.class_name for co in detail.selected_entry.co_outputs] == ['CoLoader']
 

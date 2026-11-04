@@ -157,12 +157,26 @@ class UnavailableRoot:
 
 
 @dataclass
+class ReaderInfo:
+    """The software this browser runs on, to compare with the catalog's writer."""
+
+    browser: str
+    pygeodata: str
+    python: str
+    # the newest catalog version this pygeodata reads, and the cache format it reads and writes
+    catalog_version: int
+    format_version: int
+
+
+@dataclass
 class CatalogInfo:
     mode: Literal['mirror', 'writable']
     read_only: bool
     reason: str
     catalog_id: str
+    catalog_version: int
     writer: CatalogWriter
+    reader: ReaderInfo
     pins_path: str
     thumbs_path: str
     absolute_dir_entries: int
