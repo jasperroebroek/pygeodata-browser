@@ -7,6 +7,7 @@ on:
   schedule:
     - cron: '0 6 * * 1'  # weekly: catches drift in pygeodata main and the dependencies
   workflow_dispatch:
+  workflow_call:  # release.yml publishes only when this passes
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

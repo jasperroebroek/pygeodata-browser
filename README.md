@@ -127,4 +127,6 @@ git tag v0.1.0 && git push --tags
 (both ship the prebuilt frontend, so installing never needs Node), checks them
 with `scripts/check_dist.py`, and publishes through PyPI trusted publishing.
 
-Requires pygeodata 0.3.x; release a compatible pygeodata first when both change.
+Requires pygeodata 0.5.x; release a compatible pygeodata first when both change. The
+release workflow runs `ci.yml` (the tests against pygeodata `main` and the minimum release,
+and the frontend checks) before publishing.
