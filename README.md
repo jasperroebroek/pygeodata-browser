@@ -1,6 +1,6 @@
 # pygeodata-browser
 
-QC and code-review dashboard for [pygeodata](../pygeodata) projects. Serves the
+QC and code-review dashboard for [pygeodata](https://github.com/jasperroebroek/pygeodata) projects. Serves the
 registry browser: class column, entries table, entry detail popups, code
 versioning view, export view, and bounds map.
 
