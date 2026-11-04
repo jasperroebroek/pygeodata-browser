@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.0 (unreleased)
+## 0.5.0 (2026-11-05)
 
 Released together with pygeodata 0.5.0, which it requires (`pygeodata>=0.5,<0.6`).
 The version jumps from 0.2 to 0.5 so the two packages share their version numbers from now on.
