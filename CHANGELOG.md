@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1 (2026-11-06)
+
+- Being submitted to conda-forge, together with pygeodata.
+- Distributions include `THIRD_PARTY_LICENSES.txt`, with the licences of the JavaScript
+  packages in the prebuilt frontend.
+
 ## 0.5.0 (2026-11-05)
 
 Released together with pygeodata 0.5.0, which it requires (`pygeodata>=0.5,<0.6`).

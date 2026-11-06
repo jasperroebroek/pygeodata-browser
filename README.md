@@ -87,6 +87,8 @@ unavailable.
 ## Install
 
 ```
+conda install -c conda-forge pygeodata-browser
+# or
 pip install pygeodata-browser
 # or, from the core package:
 pip install pygeodata[browser]
